@@ -112,3 +112,29 @@ export interface LatencyPercentiles {
   /** Number of reachable samples the percentiles were computed over. */
   sampleCount: number;
 }
+
+// ─── SEP-38 quote history (Q38012 / Q38013) ──────────────────────────────────
+//
+// One indicative price seen on an anchor's SEP-38 quote server, recorded per
+// probe cycle so a price history exists even when no user transacts. The
+// durable `quote_history` store lands with Q38012 (#1508); the probe (#1509)
+// writes rows through the narrow `QuoteHistorySink` in lib/reputation/probe.ts.
+
+export interface QuoteHistoryRow {
+  anchorId: string;
+  /** Corridor whose payout currency the buy asset matched. */
+  corridor: string;
+  /** SEP-38 sell asset identifier, e.g. `stellar:USDC:G...`. */
+  sellAsset: string;
+  /** SEP-38 buy asset identifier, e.g. `iso4217:NGN`. */
+  buyAsset: string;
+  /** Reference sell amount the prices were quoted for (decimal string). */
+  sellAmount: string;
+  /** Indicative unit price (decimal string, straight from the anchor). */
+  price: string;
+  /** Indicative total for `sellAmount`, fees included (decimal string). */
+  totalPrice: string;
+  source: 'sep38-prices' | 'sep38-price';
+  /** ISO-8601 timestamp of the probe observation. */
+  observedAt: string;
+}

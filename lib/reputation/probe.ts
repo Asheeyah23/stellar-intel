@@ -13,7 +13,7 @@
 
 import { getLogger } from '@/lib/logger';
 import { resolveToml, validateTomlIntegrity, type TomlResult } from '@/lib/stellar/sep1';
-import { assertSep38Capable, getSep38Price } from '@/lib/stellar/sep38';
+import { assertSep38Capable, getSep38Price, getSep38Prices } from '@/lib/stellar/sep38';
 import { getSep31Info, sep31ReceiveAssets } from '@/lib/stellar/sep31';
 import { getCorridorById } from '@/lib/stellar/anchors';
 import { verifyAssetOnChain } from '@/lib/stellar/horizon';
@@ -28,7 +28,12 @@ import {
   type AnchorHealthStatus,
 } from './thresholds';
 import { ANCHORS } from '@/constants/anchors';
-import type { ProbeFailureType, ProbeKind, ProbeLedgerRow } from '@/types/reputation';
+import type {
+  ProbeFailureType,
+  ProbeKind,
+  ProbeLedgerRow,
+  QuoteHistoryRow,
+} from '@/types/reputation';
 import type { Anchor, Sep1TomlData, Sep31Info } from '@/types';
 
 const logger = getLogger('reputation/probe');
@@ -1361,4 +1366,106 @@ export class AnchorHealthTracker {
     }
     return out;
   }
+}
+
+// ─── SEP-38 indicative price history probe (Issue Q38013 / #1509) ─────────────
+//
+// Where an anchor runs a SEP-38 quote server, record its indicative /prices
+// for the reference amount on every refresh cycle, so a price history exists
+// even when no user transacts. Rows go through the narrow sink below; the
+// durable `quote_history` backend arrives with Q38012 (#1508) and satisfies
+// the sink directly.
+
+/** Where quote-history rows land. `ReputationStore` gains this with #1508. */
+export interface QuoteHistorySink {
+  recordQuote(row: QuoteHistoryRow): Promise<void>;
+}
+
+/** Injectable dependencies for the /prices probe. */
+export interface Sep38PricesProbeDeps {
+  /** Anchor TOML fetcher. Defaults to `resolveToml` from lib/stellar/sep1. */
+  resolveToml?: typeof resolveToml;
+  /** SEP-38 GET /prices. Defaults to the real `getSep38Prices`. */
+  getPrices?: typeof getSep38Prices;
+  /** Clock for `observedAt`. Defaults to `Date.now`. */
+  now?: () => number;
+}
+
+/**
+ * Probe every SEP-38-capable anchor's indicative /prices for `amount` of its
+ * primary asset, and record one `QuoteHistoryRow` per returned buy asset that
+ * matches the payout currency of one of the anchor's corridors. Anchors
+ * without SEP-38 are skipped silently (not every anchor runs a quote server);
+ * any other failure is logged as `probe.sep38prices.skip` and never aborts
+ * the sweep. Every write is awaited before the function returns.
+ */
+export async function probeSep38Prices(
+  anchors: readonly Anchor[],
+  sink: QuoteHistorySink,
+  deps?: Sep38PricesProbeDeps,
+  amount = '100'
+): Promise<QuoteHistoryRow[]> {
+  const fetchToml = deps?.resolveToml ?? resolveToml;
+  const getPrices = deps?.getPrices ?? getSep38Prices;
+  const now = deps?.now ?? Date.now;
+
+  const rows: QuoteHistoryRow[] = [];
+  for (const anchor of anchors) {
+    const domain = anchor.serviceDomain ?? anchor.homeDomain;
+    const tomlResult = await fetchToml(domain);
+    if (!tomlResult.ok) {
+      logger.warn(
+        { event: 'probe.sep38prices.skip', anchorId: anchor.id, error: tomlResult.error },
+        'sep38 prices probe skipped an anchor: toml unavailable'
+      );
+      continue;
+    }
+
+    let quoteServer: string;
+    try {
+      quoteServer = assertSep38Capable(tomlResult.data);
+    } catch {
+      // Not every anchor runs a quote server; nothing to record, nothing to say.
+      continue;
+    }
+
+    const sellAsset = `stellar:${anchor.assetCode}:${anchor.assetIssuer}`;
+    let prices;
+    try {
+      prices = await getPrices(quoteServer, { sell_asset: sellAsset, sell_amount: amount });
+    } catch (err) {
+      logger.warn(
+        {
+          event: 'probe.sep38prices.skip',
+          anchorId: anchor.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'sep38 prices probe skipped an anchor: /prices failed'
+      );
+      continue;
+    }
+
+    const observedAt = new Date(now()).toISOString();
+    for (const corridorId of anchor.corridors) {
+      const corridor = getCorridorById(corridorId);
+      const buyAsset = `iso4217:${corridor.to}`;
+      for (const price of prices) {
+        if (price.buy_asset !== buyAsset) continue;
+        const row: QuoteHistoryRow = {
+          anchorId: anchor.id,
+          corridor: corridorId,
+          sellAsset,
+          buyAsset,
+          sellAmount: amount,
+          price: price.price,
+          totalPrice: price.total_price,
+          source: 'sep38-prices',
+          observedAt,
+        };
+        await sink.recordQuote(row);
+        rows.push(row);
+      }
+    }
+  }
+  return rows;
 }
