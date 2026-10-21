@@ -189,10 +189,7 @@ describe('fetchDepositRates', () => {
 
   it('falls back to the registered asset when /info lists nothing usable', async () => {
     mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A]);
-    const deps = makeDeps(
-      { 'https://a.example.com/sep24': infoWith({}) },
-      { USDC: 1500 }
-    );
+    const deps = makeDeps({ 'https://a.example.com/sep24': infoWith({}) }, { USDC: 1500 });
 
     const result = await fetchDepositRates('usdc-ngn', '150000', { deps });
 
@@ -247,7 +244,13 @@ describe('estimateDepositForAnchor', () => {
     const deps = makeDeps(
       {
         'https://a.example.com/sep24': infoWith({
-          [USDC_ID]: { enabled: true, fee_fixed: 1, fee_percent: 2, min_amount: 5, max_amount: 500 },
+          [USDC_ID]: {
+            enabled: true,
+            fee_fixed: 1,
+            fee_percent: 2,
+            min_amount: 5,
+            max_amount: 500,
+          },
         }),
       },
       { USDC: 1500 }

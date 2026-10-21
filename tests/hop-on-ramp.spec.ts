@@ -209,7 +209,9 @@ describe('createOnRampHop', () => {
 
   it('fails planning with no_exchange_rate when no reference price exists', async () => {
     mockReferenceMidPrice.mockRejectedValue(
-      new Error('reference mid unavailable: the SDEX order book against USDC is empty on both sides')
+      new Error(
+        'reference mid unavailable: the SDEX order book against USDC is empty on both sides'
+      )
     );
 
     const result = await makeHop().plan(NGN_INPUT, {});

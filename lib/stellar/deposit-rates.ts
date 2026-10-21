@@ -220,26 +220,34 @@ export async function fetchDepositRates(
         }
         const info = await getInfo(transferServer);
 
-        let assets: Array<{ code: string; issuer: string | null; assetInfo: Sep24AssetInfo | null }> =
-          listEnabledAssets(info, 'deposit').map((entry) => ({
-            code: entry.code,
-            issuer: entry.issuer,
-            assetInfo: entry.info,
-          }));
+        let assets: Array<{
+          code: string;
+          issuer: string | null;
+          assetInfo: Sep24AssetInfo | null;
+        }> = listEnabledAssets(info, 'deposit').map((entry) => ({
+          code: entry.code,
+          issuer: entry.issuer,
+          assetInfo: entry.info,
+        }));
         if (assets.length === 0) {
           // Registry fallback: /info listed nothing usable, but quoting the
           // anchor's registered asset (with whatever fee data /info holds for
           // it) is still better than dropping the anchor entirely.
-          const fallbackInfo = findSep24AssetInfo(info, 'deposit', anchor.assetCode, anchor.assetIssuer);
+          const fallbackInfo = findSep24AssetInfo(
+            info,
+            'deposit',
+            anchor.assetCode,
+            anchor.assetIssuer
+          );
           if (fallbackInfo && fallbackInfo.enabled === false) {
             throw new Error(`anchor does not enable ${anchor.assetCode} deposits`);
           }
-          assets = [{ code: anchor.assetCode, issuer: anchor.assetIssuer, assetInfo: fallbackInfo }];
+          assets = [
+            { code: anchor.assetCode, issuer: anchor.assetIssuer, assetInfo: fallbackInfo },
+          ];
         }
         if (opts.asset) {
-          assets = assets.filter(
-            (a) => sep38AssetId(a) === opts.asset || a.code === opts.asset
-          );
+          assets = assets.filter((a) => sep38AssetId(a) === opts.asset || a.code === opts.asset);
         }
 
         await Promise.all(
