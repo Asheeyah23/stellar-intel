@@ -340,6 +340,33 @@ describe('useWithdrawStatus — reputation recording (#799)', () => {
     expect(appends).toHaveLength(1);
   });
 
+  it('forwards direction, signature and publicKey unchanged in the append body (ONR032)', async () => {
+    const fn = mockFetchWithAppend('completed');
+    const depositContext = { ...OUTCOME_CONTEXT, direction: 'deposit' as const };
+    renderHook(() => useWithdrawStatus(TRANSFER_SERVER, TXN_ID, JWT, depositContext), { wrapper });
+    await waitFor(() => expect(findAppend(fn)).toBeDefined());
+
+    const body = appendBody(fn);
+    expect(body.direction).toBe('deposit');
+    expect(body.signature).toBe(OUTCOME_CONTEXT.signature);
+    expect(body.publicKey).toBe(OUTCOME_CONTEXT.publicKey);
+  });
+
+  it('appends an unsigned outcome when the context carries no signature (ONR032)', async () => {
+    const fn = mockFetchWithAppend('completed');
+    const { signature: _sig, publicKey: _pk, ...unsigned } = OUTCOME_CONTEXT;
+    renderHook(
+      () => useWithdrawStatus(TRANSFER_SERVER, TXN_ID, JWT, { ...unsigned, direction: 'deposit' }),
+      { wrapper }
+    );
+    await waitFor(() => expect(findAppend(fn)).toBeDefined());
+
+    const body = appendBody(fn);
+    expect(body.direction).toBe('deposit');
+    expect('signature' in body).toBe(false);
+    expect('publicKey' in body).toBe(false);
+  });
+
   it('never includes key material in the appended outcome (non-custodial)', async () => {
     const fn = mockFetchWithAppend('completed');
     renderHook(() => useWithdrawStatus(TRANSFER_SERVER, TXN_ID, JWT, OUTCOME_CONTEXT), { wrapper });
@@ -356,6 +383,8 @@ describe('useWithdrawStatus — reputation recording (#799)', () => {
       'deliveredAmount',
       'settleSeconds',
       'stellarTransactionId',
+      // Transfer direction (ONR031/ONR032).
+      'direction',
       // The attestation: a public key and a signature, never a secret.
       'publicKey',
       'signature',
