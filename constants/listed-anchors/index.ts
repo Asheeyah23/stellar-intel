@@ -18,6 +18,7 @@ import blackRidgeTrust from './black-ridge-trust.json';
 import circleUsdc from './circle-usdc.json';
 import digitra from './digitra.json';
 import etherfuse from './etherfuse.json';
+import fchain from './fchain.json';
 import fxdao from './fxdao.json';
 import gmoTrust from './gmo-trust.json';
 import gratz from './gratz.json';
@@ -48,6 +49,7 @@ const RAW: unknown[] = [
   circleUsdc,
   digitra,
   etherfuse,
+  fchain,
   fxdao,
   gmoTrust,
   gratz,
