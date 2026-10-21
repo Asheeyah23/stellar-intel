@@ -124,9 +124,7 @@ export class SqliteReputationStore implements ReputationStore {
     }
     // ONR031: pre-existing rows are all off-ramp outcomes.
     if (!columns.has('direction')) {
-      this.db.exec(
-        `ALTER TABLE outcome_log ADD COLUMN direction TEXT NOT NULL DEFAULT 'withdraw'`
-      );
+      this.db.exec(`ALTER TABLE outcome_log ADD COLUMN direction TEXT NOT NULL DEFAULT 'withdraw'`);
     }
   }
 

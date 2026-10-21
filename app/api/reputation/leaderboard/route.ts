@@ -97,9 +97,7 @@ async function buildLeaderboard(corridorFilter: string | undefined): Promise<Lea
 
   const entries = await Promise.all(
     anchors.map(async (anchor): Promise<LeaderboardEntry> => {
-      const rows = store
-        ? await store.query({ anchorId: anchor.id, direction: 'withdraw' })
-        : [];
+      const rows = store ? await store.query({ anchorId: anchor.id, direction: 'withdraw' }) : [];
 
       const scorecard = buildScorecards(mapOutcomeRows(rows))[30];
       const fill_rate = scorecard.state === 'ok' ? scorecard.fillRate : 0;
