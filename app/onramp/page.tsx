@@ -97,9 +97,8 @@ function OnrampContent() {
     () => [...new Set((comparison?.rates ?? []).map((r) => r.asset))],
     [comparison]
   );
-  const activeAssetId = selectedAssetId && assetIds.includes(selectedAssetId)
-    ? selectedAssetId
-    : (assetIds[0] ?? null);
+  const activeAssetId =
+    selectedAssetId && assetIds.includes(selectedAssetId) ? selectedAssetId : (assetIds[0] ?? null);
   const visibleRates = (comparison?.rates ?? []).filter(
     (r) => activeAssetId === null || r.asset === activeAssetId
   );
@@ -226,16 +225,9 @@ function OnrampContent() {
       <DisclaimerBanner />
 
       <div className="grid grid-cols-1 gap-4 rounded-xl border border-border bg-bg-sunken p-4 sm:grid-cols-3">
-        <CorridorSelector
-          value={corridorId}
-          onChange={setCorridorId}
-          assetCode={corridor.from}
-        />
+        <CorridorSelector value={corridorId} onChange={setCorridorId} assetCode={corridor.from} />
         <div>
-          <label
-            htmlFor="deposit-amount"
-            className="mb-1 block text-xs font-medium text-fg-muted"
-          >
+          <label htmlFor="deposit-amount" className="mb-1 block text-xs font-medium text-fg-muted">
             Amount ({corridor.to})
           </label>
           <input
@@ -249,10 +241,7 @@ function OnrampContent() {
         </div>
         {assetIds.length > 0 && (
           <div>
-            <label
-              htmlFor="deposit-asset"
-              className="mb-1 block text-xs font-medium text-fg-muted"
-            >
+            <label htmlFor="deposit-asset" className="mb-1 block text-xs font-medium text-fg-muted">
               Receive asset
             </label>
             <select
@@ -278,7 +267,10 @@ function OnrampContent() {
       )}
 
       {depositError && (
-        <div role="alert" className="rounded-xl border border-status-down/40 bg-bg-sunken px-4 py-3 text-sm text-status-down">
+        <div
+          role="alert"
+          className="rounded-xl border border-status-down/40 bg-bg-sunken px-4 py-3 text-sm text-status-down"
+        >
           {depositError}
         </div>
       )}
@@ -322,12 +314,13 @@ function OnrampContent() {
             {visibleRates.map((row) => {
               const { code } = parseAssetId(row.asset);
               return (
-                <tr key={`${row.anchorId}-${row.asset}`} className="border-b border-border last:border-b-0">
+                <tr
+                  key={`${row.anchorId}-${row.asset}`}
+                  className="border-b border-border last:border-b-0"
+                >
                   <td className="px-4 py-3 text-primary-text">{row.anchorName}</td>
                   <td className="px-4 py-3 text-primary-text">
-                    {row.totalReceived === null
-                      ? '—'
-                      : `≈ ${row.totalReceived.toFixed(2)} ${code}`}
+                    {row.totalReceived === null ? '—' : `≈ ${row.totalReceived.toFixed(2)} ${code}`}
                   </td>
                   <td className="px-4 py-3 text-fg-muted">
                     {row.fee === null ? '—' : `${row.fee} ${code}`}
