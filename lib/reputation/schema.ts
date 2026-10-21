@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { OUTCOME_STATUSES, type OutcomeLogRow, type OutcomeStatus } from '@/types/reputation';
+import {
+  OUTCOME_DIRECTIONS,
+  OUTCOME_STATUSES,
+  type OutcomeLogRow,
+  type OutcomeStatus,
+} from '@/types/reputation';
 import { AMOUNT_PATTERN, SIGNED_AMOUNT_PATTERN, STELLAR_PUBKEY_PATTERN } from '@/lib/patterns';
 import { ANCHORS } from '@/constants/anchors';
 
@@ -12,6 +17,7 @@ export const OutcomeLogRowSchema = z.object({
   intentHash: z.string().min(1),
   anchorId: z.string().min(1),
   corridor: z.string().min(1),
+  direction: z.enum(OUTCOME_DIRECTIONS),
   quotedRate: decimalString,
   deliveredRate: decimalString.nullable(),
   quotedAmount: decimalString,
@@ -77,6 +83,8 @@ export const AppendOutcomeInputSchema = z
       .max(64)
       .refine((id) => ANCHOR_CORRIDORS.has(id), 'anchorId is not a registered anchor'),
     corridor: z.string().min(1).max(32),
+    /** Optional so pre-ONR031 clients keep working; `toOutcomeLogRow` defaults it. */
+    direction: z.enum(OUTCOME_DIRECTIONS).optional(),
     quotedRate: boundedDecimal(MAX_OUTCOME_RATE, 'quotedRate'),
     quotedAmount: boundedDecimal(MAX_OUTCOME_AMOUNT, 'quotedAmount'),
     outcome: z.enum(OUTCOME_STATUSES),
@@ -114,6 +122,7 @@ export function toOutcomeLogRow(input: AppendOutcomeInput, now = new Date()): Ou
     intentHash: input.intentHash,
     anchorId: input.anchorId,
     corridor: input.corridor,
+    direction: input.direction ?? 'withdraw',
     quotedRate: input.quotedRate,
     deliveredRate: input.deliveredRate ?? null,
     quotedAmount: input.quotedAmount,

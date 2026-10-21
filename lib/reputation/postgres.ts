@@ -25,6 +25,7 @@ const CREATE_TABLE_SQL = `
     intent_hash            TEXT PRIMARY KEY,
     anchor_id              TEXT NOT NULL,
     corridor               TEXT NOT NULL,
+    direction              TEXT NOT NULL DEFAULT 'withdraw',
     quoted_rate            TEXT NOT NULL,
     delivered_rate         TEXT,
     quoted_amount          TEXT NOT NULL,
@@ -66,6 +67,13 @@ export const MIGRATE_ATTESTATION_SQL = `
     ADD COLUMN IF NOT EXISTS signer_account TEXT;
 `;
 
+// Tables created before ONR031 lack the direction column; every pre-existing
+// row is an off-ramp outcome, which the DEFAULT backfills.
+export const MIGRATE_DIRECTION_SQL = `
+  ALTER TABLE outcome_log
+    ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'withdraw';
+`;
+
 function asString(v: unknown): string | null {
   return v == null ? null : String(v);
 }
@@ -75,6 +83,7 @@ function fromDb(r: Record<string, unknown>): OutcomeLogRow {
     intentHash: String(r['intent_hash']),
     anchorId: String(r['anchor_id']),
     corridor: String(r['corridor']),
+    direction: r['direction'] === 'deposit' ? 'deposit' : 'withdraw',
     quotedRate: String(r['quoted_rate']),
     deliveredRate: asString(r['delivered_rate']),
     quotedAmount: String(r['quoted_amount']),
@@ -118,6 +127,7 @@ export class PostgresReputationStore implements ReputationStore {
       this.ready = this.sql
         .query(CREATE_TABLE_SQL)
         .then(() => this.sql.query(MIGRATE_ATTESTATION_SQL))
+        .then(() => this.sql.query(MIGRATE_DIRECTION_SQL))
         .then(() => undefined)
         .catch((err: unknown) => {
           // Reset so a transient failure does not permanently poison the store.
@@ -135,16 +145,17 @@ export class PostgresReputationStore implements ReputationStore {
     // published_at/reconciled_at and push the row back through the publisher.
     const { rows } = await this.sql.query(
       `INSERT INTO outcome_log
-         (intent_hash, anchor_id, corridor, quoted_rate, delivered_rate, quoted_amount,
+         (intent_hash, anchor_id, corridor, direction, quoted_rate, delivered_rate, quoted_amount,
           delivered_amount, settle_seconds, outcome, created_at, stellar_transaction_id, reconciled_at,
           disputed, disputed_reason, published_at, oracle_tx_hash, attested, signer_account)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        ON CONFLICT (intent_hash) DO NOTHING
        RETURNING intent_hash`,
       [
         row.intentHash,
         row.anchorId,
         row.corridor,
+        row.direction,
         row.quotedRate,
         row.deliveredRate,
         row.quotedAmount,
@@ -176,6 +187,10 @@ export class PostgresReputationStore implements ReputationStore {
     if (filter.corridor) {
       params.push(filter.corridor);
       where.push(`corridor = $${params.length}`);
+    }
+    if (filter.direction) {
+      params.push(filter.direction);
+      where.push(`direction = $${params.length}`);
     }
     if (filter.pendingReconciliationOnly) {
       where.push(

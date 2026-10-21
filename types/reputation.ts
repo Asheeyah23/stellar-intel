@@ -7,11 +7,21 @@
 export const OUTCOME_STATUSES = ['completed', 'partial', 'refunded', 'expired', 'error'] as const;
 export type OutcomeStatus = (typeof OUTCOME_STATUSES)[number];
 
+/**
+ * Which way the money moved (ONR031). Rows predate this field, so every read
+ * that scores off-ramps must filter on `'withdraw'` explicitly — an unfiltered
+ * query would count deposits as withdrawals on the same corridor id.
+ */
+export const OUTCOME_DIRECTIONS = ['withdraw', 'deposit'] as const;
+export type OutcomeDirection = (typeof OUTCOME_DIRECTIONS)[number];
+
 export interface OutcomeLogRow {
   /** SHA-256 of the canonical intent — the row's primary key. */
   intentHash: string;
   anchorId: string;
   corridor: string;
+  /** Off-ramp withdrawal or on-ramp deposit; legacy rows default to 'withdraw'. */
+  direction: OutcomeDirection;
   /** Quoted exchange rate (decimal string) at intent time. */
   quotedRate: string;
   /** Actual delivered rate, backfilled by the reconciler; null until settled. */
