@@ -14,10 +14,14 @@ describe('referenceMidPrice (Q38017)', () => {
     const getUsdFxRate = vi.fn().mockResolvedValue(1600);
     const getOrderBook = vi.fn();
 
-    const result = await referenceMidPrice({ ...USDC_ASSET }, 'NGN', {
-      getUsdFxRate,
-      getOrderBook,
-    });
+    const result = await referenceMidPrice(
+      { code: USDC_ASSET.code, issuer: USDC_ASSET.issuer ?? null },
+      'NGN',
+      {
+        getUsdFxRate,
+        getOrderBook,
+      }
+    );
 
     expect(result).toEqual({
       price: 1600,

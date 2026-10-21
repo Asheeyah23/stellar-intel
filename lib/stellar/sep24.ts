@@ -179,6 +179,79 @@ export function resolveAssetParams(
   return params;
 }
 
+/**
+ * Looks up one asset's entry in a SEP-24 /info operation map (ONR007).
+ *
+ * Anchors key these maps either by SEP-38 identifier (`stellar:CODE:ISSUER`)
+ * or by bare code (`USDC`), and native XLM additionally appears as
+ * `stellar:native` or `native`. This is the one place that tries the variants
+ * in order, so callers stop re-implementing the lookup inconsistently.
+ */
+export function findSep24AssetInfo(
+  info: Sep24InfoResponse | null,
+  operation: 'deposit' | 'withdraw',
+  assetCode: string,
+  assetIssuer?: string
+): Sep24AssetInfo | null {
+  const map = info?.[operation];
+  if (!map) return null;
+
+  const candidates =
+    assetCode === 'XLM' && !assetIssuer
+      ? ['stellar:native', 'native']
+      : assetIssuer
+        ? [`stellar:${assetCode}:${assetIssuer}`, assetCode]
+        : [assetCode];
+
+  for (const key of candidates) {
+    const entry = map[key];
+    if (entry) return entry;
+  }
+  return null;
+}
+
+/** One enabled asset parsed out of a SEP-24 /info operation map. */
+export interface Sep24EnabledAsset {
+  /** The raw /info key, exactly as the anchor published it. */
+  key: string;
+  code: string;
+  /** Issuer parsed from an identifier-style key; null for native XLM or a bare code key. */
+  issuer: string | null;
+  info: Sep24AssetInfo;
+}
+
+/**
+ * Lists the assets an anchor enables for `operation` in its SEP-24 /info
+ * (ONR007). Entries whose `enabled` is not exactly `true` are left out, and
+ * identifier-style keys are parsed into code and issuer so callers can build
+ * requests for any supported asset, not only the registry's primary one.
+ */
+export function listEnabledAssets(
+  info: Sep24InfoResponse | null,
+  operation: 'deposit' | 'withdraw'
+): Sep24EnabledAsset[] {
+  const map = info?.[operation];
+  if (!map) return [];
+
+  const assets: Sep24EnabledAsset[] = [];
+  for (const [key, entry] of Object.entries(map)) {
+    if (entry?.enabled !== true) continue;
+    if (key === 'native' || key === 'stellar:native') {
+      assets.push({ key, code: 'XLM', issuer: null, info: entry });
+      continue;
+    }
+    const identifier = /^stellar:([^:]+):([^:]+)$/.exec(key);
+    const code = identifier?.[1];
+    const issuer = identifier?.[2];
+    if (code && issuer) {
+      assets.push({ key, code, issuer, info: entry });
+    } else {
+      assets.push({ key, code: key, issuer: null, info: entry });
+    }
+  }
+  return assets;
+}
+
 // ─── GET /fee (low-level, takes transferServer directly) ─────────────────────
 
 export type Sep24FeeResult = { ok: true; fee: number } | { ok: false; reason: 'unsupported' };

@@ -194,6 +194,44 @@ export interface RateComparison {
   errors?: AnchorRateError[];
 }
 
+/**
+ * One (anchor, asset) on-ramp estimate: "for `fiatAmount` of fiat, this anchor
+ * would credit about `totalReceived` of `asset`". Always indicative — SEP-24
+ * sets the firm fiat→asset conversion only inside the anchor's interactive
+ * deposit flow. Built by `lib/stellar/deposit-rates.ts`.
+ */
+export interface DepositRate {
+  anchorId: string;
+  anchorName: string;
+  corridorId: string;
+  /** SEP-38 identifier of the credited asset: `stellar:CODE:ISSUER` or `stellar:native`. */
+  asset: string;
+  /** Fiat the user pays, in units of the corridor's fiat currency. */
+  fiatAmount: number;
+  /** Flat fee in units of the credited asset; null when none is published. */
+  fee: number | null;
+  feeType: AnchorRate['feeType'];
+  /** Effective asset credited per 1 fiat unit, net of fees; null when unreachable. */
+  exchangeRate: number | null;
+  totalReceived: number | null;
+  /** Deposit bounds from the anchor's SEP-24 /info, in asset units, when published. */
+  minAmount?: number;
+  maxAmount?: number;
+  source: 'sep38' | 'sep24-fee' | 'unavailable';
+  /** Names the reference price behind the estimate (see `referenceMidPrice`). */
+  referenceSource?: string;
+  updatedAt: Date;
+}
+
+/** All deposit estimates for one corridor, with per-anchor failures isolated. */
+export interface DepositRateComparison {
+  corridorId: string;
+  direction: 'deposit';
+  rates: DepositRate[];
+  bestRateId: string;
+  errors: AnchorRateError[];
+}
+
 // ─── Wallet ───────────────────────────────────────────────────────────────────
 
 /** The current state of the Freighter browser extension. */
