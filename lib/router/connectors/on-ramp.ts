@@ -11,7 +11,14 @@
 import { getResolvedAnchorById } from '@/lib/stellar/anchors';
 import { estimateDepositForAnchor, NoDepositRateError } from '@/lib/stellar/deposit-rates';
 import { initiateDeposit } from '@/lib/stellar/sep24';
-import type { DepositRate, Hop, HopAsset, HopExecutionResult, HopPlanResult, HopStep } from '@/types';
+import type {
+  DepositRate,
+  Hop,
+  HopAsset,
+  HopExecutionResult,
+  HopPlanResult,
+  HopStep,
+} from '@/types';
 
 export interface OnRampHopParams {
   /** Anchor id from constants/anchors.ts, e.g. 'moneygram'. */

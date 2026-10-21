@@ -1,10 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import {
-  findSep24AssetInfo,
-  listEnabledAssets,
-  type Sep24InfoResponse,
-} from '@/lib/stellar/sep24';
+import { findSep24AssetInfo, listEnabledAssets, type Sep24InfoResponse } from '@/lib/stellar/sep24';
 
 const USDC_ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
 
