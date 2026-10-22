@@ -205,6 +205,54 @@ const RateComparisonSchema = registry.register(
   })
 );
 
+const DepositRateSchema = registry.register(
+  'DepositRate',
+  z.object({
+    anchorId: z.string(),
+    anchorName: z.string(),
+    corridorId: z.string(),
+    asset: z
+      .string()
+      .describe('SEP-38 identifier of the credited asset: stellar:CODE:ISSUER or stellar:native'),
+    fiatAmount: z.number().describe("Fiat the user pays, in units of the corridor's fiat currency"),
+    fee: z
+      .number()
+      .nullable()
+      .describe('Flat fee in units of the credited asset; null when none is published'),
+    feeType: z.string(),
+    exchangeRate: z
+      .number()
+      .nullable()
+      .describe('Effective asset credited per 1 fiat unit, net of fees; null when unreachable'),
+    totalReceived: z.number().nullable(),
+    minAmount: z
+      .number()
+      .optional()
+      .describe("Deposit lower bound from the anchor's SEP-24 /info, in asset units"),
+    maxAmount: z
+      .number()
+      .optional()
+      .describe("Deposit upper bound from the anchor's SEP-24 /info, in asset units"),
+    source: z.enum(['sep38', 'sep24-fee', 'unavailable']),
+    referenceSource: z
+      .string()
+      .optional()
+      .describe('Names the reference price behind the estimate'),
+    updatedAt: z.string(),
+  })
+);
+
+const DepositRateComparisonSchema = registry.register(
+  'DepositRateComparison',
+  z.object({
+    corridorId: z.string(),
+    direction: z.literal('deposit'),
+    rates: z.array(DepositRateSchema),
+    bestRateId: z.string(),
+    errors: z.array(z.object({ anchorId: z.string(), anchorName: z.string(), reason: z.string() })),
+  })
+);
+
 const DisputeRecordSchema = registry.register(
   'DisputeRecord',
   z.object({
@@ -323,6 +371,55 @@ registry.registerPath({
     },
     429: {
       description: 'Rate limited',
+      content: { 'application/json': { schema: ApiErrorSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/deposit-rates/{corridor}',
+  summary: 'Get indicative deposit (on-ramp) estimates for a corridor',
+  description:
+    'Returns per-anchor SEP-24 deposit estimates for the given corridor: fiat in, asset credited net of published fees, with per-anchor failures isolated into `errors`. ' +
+    'Every figure is indicative; the anchor sets the firm conversion inside its interactive deposit flow.',
+  tags: ['Rates'],
+  request: {
+    params: z.object({ corridor: CorridorPathParam }),
+    query: z.object({
+      amount: z
+        .string()
+        .optional()
+        .openapi({
+          param: { name: 'amount', in: 'query' },
+          example: '150000',
+          description: 'Fiat amount to deposit (positive decimal); defaults to 100',
+        }),
+      asset: z
+        .string()
+        .optional()
+        .openapi({
+          param: { name: 'asset', in: 'query' },
+          example: 'stellar:USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+          description: "SEP-38 asset identifier to credit; defaults to the corridor's asset",
+        }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Deposit estimates for the corridor',
+      content: { 'application/json': { schema: DepositRateComparisonSchema } },
+    },
+    400: {
+      description: 'Unknown corridor or invalid amount',
+      content: { 'application/json': { schema: ApiErrorSchema } },
+    },
+    429: {
+      description: 'Rate limited',
+      content: { 'application/json': { schema: ApiErrorSchema } },
+    },
+    502: {
+      description: 'The deposit estimate could not be computed',
       content: { 'application/json': { schema: ApiErrorSchema } },
     },
   },

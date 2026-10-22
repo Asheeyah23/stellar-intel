@@ -38,6 +38,7 @@ the hardening contract (see `lib/api/v1.ts`):
   - [`POST /api/intent/offramp`](#post-apiintentofframp)
   - [`POST /api/v1/intent/offramp`](#post-apiv1intentofframp)
 - **Rates**
+  - [`GET /api/deposit-rates/{corridor}`](#get-apideposit-ratescorridor)
   - [`GET /api/rates/{corridor}`](#get-apiratescorridor)
   - [`GET /api/snapshot`](#get-apisnapshot)
   - [`GET /api/v1/corridors/{corridor}/volume-savings`](#get-apiv1corridorscorridorvolume-savings)
@@ -260,6 +261,31 @@ The public v1 intent endpoint. Honours `Idempotency-Key`: a retried request repl
 ---
 
 ## Rates
+
+### `GET /api/deposit-rates/{corridor}`
+
+**Summary:** Get indicative deposit (on-ramp) estimates for a corridor  
+
+Returns per-anchor SEP-24 deposit estimates for the given corridor: fiat in, asset credited net of published fees, with per-anchor failures isolated into `errors`. Every figure is indicative; the anchor sets the firm conversion inside its interactive deposit flow.
+
+#### Parameters
+
+| Name | In | Type | Required | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `corridor` | `path` | `string` | **Yes** | Corridor ID (e.g. usdc-ngn, usdc-kes) |
+| `amount` | `query` | `string` | No | Fiat amount to deposit (positive decimal); defaults to 100 |
+| `asset` | `query` | `string` | No | SEP-38 asset identifier to credit; defaults to the corridor's asset |
+
+#### Responses
+
+| Status | Description | Content-Type | Schema |
+| :--- | :--- | :--- | :--- |
+| `200` | Deposit estimates for the corridor | `application/json` | `DepositRateComparison` |
+| `400` | Unknown corridor or invalid amount | `application/json` | `ApiError` |
+| `429` | Rate limited | `application/json` | `ApiError` |
+| `502` | The deposit estimate could not be computed | `application/json` | `ApiError` |
+
+---
 
 ### `GET /api/rates/{corridor}`
 
