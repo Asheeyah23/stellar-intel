@@ -35,6 +35,7 @@ import phoenix from './phoenix.json';
 import reyts from './reyts.json';
 import sl8 from './sl8.json';
 import stronghold from './stronghold.json';
+import transparentNetwork from './transparent-network.json';
 import ultraCapital from './ultra-capital.json';
 import valtorum from './valtorum.json';
 import vnx from './vnx.json';
@@ -67,6 +68,7 @@ const RAW: unknown[] = [
   reyts,
   sl8,
   stronghold,
+  transparentNetwork,
   ultraCapital,
   valtorum,
   vnx,
