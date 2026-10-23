@@ -42,6 +42,7 @@ import transparentNetwork from './transparent-network.json';
 import ultraCapital from './ultra-capital.json';
 import valtorum from './valtorum.json';
 import vnx from './vnx.json';
+import wisdomtree from './wisdomtree.json';
 import ximcoin from './ximcoin.json';
 
 const RAW: unknown[] = [
@@ -78,6 +79,7 @@ const RAW: unknown[] = [
   ultraCapital,
   valtorum,
   vnx,
+  wisdomtree,
   ximcoin,
 ];
 
