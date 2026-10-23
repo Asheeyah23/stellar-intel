@@ -20,6 +20,7 @@ import digitra from './digitra.json';
 import etherfuse from './etherfuse.json';
 import fchain from './fchain.json';
 import fxdao from './fxdao.json';
+import gloDollar from './glo-dollar.json';
 import gmoTrust from './gmo-trust.json';
 import gratz from './gratz.json';
 import ixinium from './ixinium.json';
@@ -53,6 +54,7 @@ const RAW: unknown[] = [
   etherfuse,
   fchain,
   fxdao,
+  gloDollar,
   gmoTrust,
   gratz,
   ixinium,
