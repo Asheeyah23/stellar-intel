@@ -28,7 +28,7 @@ describe('WisdomTree listed anchor', () => {
           code: 'USD',
           issuer: 'GC2ATEL4K2O5BJO7Z76MYSV6TKHCROKV5GXEOU7NO2TUEOOMFDDIPWID',
         }),
-      ]),
+      ])
     );
   });
 
