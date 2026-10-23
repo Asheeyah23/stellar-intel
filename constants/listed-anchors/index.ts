@@ -33,6 +33,7 @@ import moneygramMgusd from './moneygram-mgusd.json';
 import nafuloo from './nafuloo.json';
 import naobtc from './naobtc.json';
 import phoenix from './phoenix.json';
+import rawJuiceGuru from './raw-juice-guru.json';
 import reyts from './reyts.json';
 import sl8 from './sl8.json';
 import stronghold from './stronghold.json';
@@ -67,6 +68,7 @@ const RAW: unknown[] = [
   nafuloo,
   naobtc,
   phoenix,
+  rawJuiceGuru,
   reyts,
   sl8,
   stronghold,
