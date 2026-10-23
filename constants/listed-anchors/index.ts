@@ -16,6 +16,7 @@ import audd from './audd.json';
 import bitbond from './bitbond.json';
 import blackRidgeTrust from './black-ridge-trust.json';
 import circleUsdc from './circle-usdc.json';
+import cru from './cru.json';
 import digitra from './digitra.json';
 import etherfuse from './etherfuse.json';
 import fchain from './fchain.json';
@@ -51,6 +52,7 @@ const RAW: unknown[] = [
   bitbond,
   blackRidgeTrust,
   circleUsdc,
+  cru,
   digitra,
   etherfuse,
   fchain,
