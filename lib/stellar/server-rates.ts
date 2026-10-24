@@ -120,7 +120,7 @@ function isNetworkError(err: unknown): boolean {
  * Deterministic 4xx failures are never retried; transient 5xx/timeouts/fetch errors
  * get at most `retryAttempts` extra tries.
  */
-async function withTimeoutRetry<T>(
+export async function withTimeoutRetry<T>(
   fn: () => Promise<T>,
   ms: number,
   label: string,
