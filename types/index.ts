@@ -159,6 +159,10 @@ export interface AnchorRate {
    * live /info; see Anchor.unverifiedCorridors.
    */
   unverifiedPayout?: boolean;
+  /** Reference source for indicative estimates ('fx' for fiat peg, 'sdex+fx' for SDEX mid converted via FX). */
+  referenceSource?: 'fx' | 'sdex+fx';
+  /** Human-readable explanation of how the reference price was derived. */
+  referenceDetail?: string;
 }
 
 /**
