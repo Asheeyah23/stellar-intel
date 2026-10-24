@@ -159,6 +159,10 @@ export interface AnchorRate {
    * live /info; see Anchor.unverifiedCorridors.
    */
   unverifiedPayout?: boolean;
+  /** Reference source for indicative estimates ('fx' for fiat peg, 'sdex+fx' for SDEX mid converted via FX). */
+  referenceSource?: 'fx' | 'sdex+fx';
+  /** Human-readable explanation of how the reference price was derived. */
+  referenceDetail?: string;
 }
 
 /**
@@ -386,7 +390,8 @@ export interface Sep24WithdrawResponse {
 export interface Sep24DepositRequest {
   assetCode: string;
   assetIssuer: string;
-  amount: string;
+  /** Asset units to deposit. Omit to let the anchor's interactive flow collect it. */
+  amount?: string | undefined;
   account: string; // user's Stellar public key, credited on deposit completion
   jwt: string;
 }

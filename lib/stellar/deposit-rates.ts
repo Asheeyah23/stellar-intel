@@ -6,7 +6,9 @@ import {
   getSep24Info as fetchSep24Info,
   listEnabledAssets,
   type Sep24AssetInfo,
+  type Sep24InfoResponse,
 } from './sep24';
+import { serverRatesConfig, withTimeoutRetry } from './server-rates';
 import { referenceMidPrice as fetchReferenceMidPrice } from '@/lib/fx/reference-mid';
 
 /**
@@ -30,6 +32,12 @@ export interface DepositRateDeps {
 }
 
 export interface DepositEstimateOptions {
+  /**
+   * The anchor's SEP-24 /info, when the caller has already loaded it. Skips the
+   * TOML and /info fetch, so `fetchDepositRates` and the hop run the same
+   * estimate path for the same inputs.
+   */
+  info?: Sep24InfoResponse;
   /**
    * SEP-24 funding method. Published /info fees do not vary by method, so it
    * does not change the estimate today; it is part of the signature so the
@@ -61,6 +69,17 @@ export class NoDepositRateError extends Error {
   }
 }
 
+/**
+ * Thrown for a fiat amount that is not a positive finite number. The on-ramp
+ * hop maps it to `amount_too_small`, not to a fee-lookup failure.
+ */
+export class InvalidDepositAmountError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidDepositAmountError';
+  }
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -87,6 +106,35 @@ function inferCorridorId(
 }
 
 /**
+ * Fills in the issuer of an asset an anchor keyed by bare code in /info
+ * (`USDC` rather than `stellar:USDC:G…`), which `listEnabledAssets` returns
+ * with `issuer: null`. `sep38AssetId` would label such a row native XLM, and
+ * `referenceMidPrice` would miss the USDC path, so the issuer is taken from
+ * the registry: the anchor's own asset, then a corridor it serves.
+ *
+ * Returns null when the registry cannot say, so the caller records an error
+ * instead of quoting a non-native asset as native.
+ */
+function resolveAssetIssuer(
+  anchor: Anchor,
+  asset: { code: string; issuer: string | null }
+): { code: string; issuer: string | null } | null {
+  if (asset.issuer !== null || asset.code === 'XLM') return asset;
+  if (anchor.assetCode === asset.code) return { code: asset.code, issuer: anchor.assetIssuer };
+  for (const id of anchor.corridors) {
+    try {
+      const corridor = getCorridorById(id);
+      if (corridor.from === asset.code && corridor.fromIssuer !== null) {
+        return { code: asset.code, issuer: corridor.fromIssuer };
+      }
+    } catch {
+      // Unregistered corridor id on the anchor; keep looking.
+    }
+  }
+  return null;
+}
+
+/**
  * Builds one (anchor, asset) row: fiat → asset through the reference mid
  * price, minus the anchor's published SEP-24 deposit fees (asset units, the
  * same convention as the withdraw-side estimate). Throws `NoDepositRateError`
@@ -104,7 +152,9 @@ async function buildDepositRow(
   const referenceMid = deps.referenceMidPrice ?? fetchReferenceMidPrice;
 
   if (!Number.isFinite(fiatAmount) || fiatAmount <= 0) {
-    throw new Error(`invalid fiat amount "${fiatAmount}" for a ${fiatCode} deposit`);
+    throw new InvalidDepositAmountError(
+      `invalid fiat amount "${fiatAmount}" for a ${fiatCode} deposit`
+    );
   }
 
   let reference;
@@ -170,13 +220,20 @@ export async function estimateDepositForAnchor(
   const resolveToml = deps.resolveAnchor ?? resolveAnchorToml;
   const getInfo = deps.getSep24Info ?? fetchSep24Info;
 
-  const toml = await resolveToml(anchor.serviceDomain ?? anchor.homeDomain);
-  const transferServer = toml.TRANSFER_SERVER_SEP0024;
-  if (!transferServer) {
-    throw new Error(`${anchor.name} advertises no SEP-24 transfer server`);
+  let info = opts.info;
+  if (!info) {
+    const toml = await resolveToml(anchor.serviceDomain ?? anchor.homeDomain);
+    const transferServer = toml.TRANSFER_SERVER_SEP0024;
+    if (!transferServer) {
+      throw new Error(`${anchor.name} advertises no SEP-24 transfer server`);
+    }
+    info = await withTimeoutRetry(
+      () => getInfo(transferServer),
+      serverRatesConfig.sep24Info.timeoutMs,
+      `${anchor.name} SEP-24 /info`,
+      serverRatesConfig.sep24Info.retryAttempts
+    );
   }
-
-  const info = await getInfo(transferServer);
   const assetInfo = findSep24AssetInfo(info, 'deposit', asset.code, asset.issuer ?? undefined);
   if (assetInfo && assetInfo.enabled === false) {
     throw new Error(`${anchor.name} does not enable ${asset.code} deposits`);
@@ -202,7 +259,6 @@ export async function fetchDepositRates(
   const corridor = getCorridorById(corridorId); // throws on unknown corridor
   const anchors = getAnchorsByCorridorId(corridorId);
   const fiatCode = corridor.to;
-  const fiatAmountNum = Number(fiatAmount);
   const deps = opts.deps ?? {};
   const resolveToml = deps.resolveAnchor ?? resolveAnchorToml;
   const getInfo = deps.getSep24Info ?? fetchSep24Info;
@@ -218,57 +274,59 @@ export async function fetchDepositRates(
         if (!transferServer) {
           throw new Error('anchor advertises no SEP-24 transfer server');
         }
-        const info = await getInfo(transferServer);
+        const info = await withTimeoutRetry(
+          () => getInfo(transferServer),
+          serverRatesConfig.sep24Info.timeoutMs,
+          `${anchor.name} SEP-24 /info`,
+          serverRatesConfig.sep24Info.retryAttempts
+        );
 
-        let assets: Array<{
-          code: string;
-          issuer: string | null;
-          assetInfo: Sep24AssetInfo | null;
-        }> = listEnabledAssets(info, 'deposit').map((entry) => ({
-          code: entry.code,
-          issuer: entry.issuer,
-          assetInfo: entry.info,
-        }));
+        let assets: Array<{ code: string; issuer: string | null }> = listEnabledAssets(
+          info,
+          'deposit'
+        ).map((entry) => ({ code: entry.code, issuer: entry.issuer }));
         if (assets.length === 0) {
           // Registry fallback: /info listed nothing usable, but quoting the
-          // anchor's registered asset (with whatever fee data /info holds for
-          // it) is still better than dropping the anchor entirely.
-          const fallbackInfo = findSep24AssetInfo(
-            info,
-            'deposit',
-            anchor.assetCode,
-            anchor.assetIssuer
-          );
-          if (fallbackInfo && fallbackInfo.enabled === false) {
-            throw new Error(`anchor does not enable ${anchor.assetCode} deposits`);
-          }
-          assets = [
-            { code: anchor.assetCode, issuer: anchor.assetIssuer, assetInfo: fallbackInfo },
-          ];
-        }
-        if (opts.asset) {
-          assets = assets.filter((a) => sep38AssetId(a) === opts.asset || a.code === opts.asset);
+          // anchor's registered asset (the estimate path still honours a
+          // disabled entry) is better than dropping the anchor entirely.
+          assets = [{ code: anchor.assetCode, issuer: anchor.assetIssuer }];
         }
 
+        const resolved: Array<{ code: string; issuer: string | null }> = [];
+        for (const asset of assets) {
+          const withIssuer = resolveAssetIssuer(anchor, asset);
+          if (withIssuer) {
+            resolved.push(withIssuer);
+          } else {
+            errors.push({
+              anchorId: anchor.id,
+              anchorName: anchor.name,
+              reason: `${asset.code}: /info lists this asset by bare code and the registry has no issuer for it`,
+            });
+          }
+        }
+        const wanted = opts.asset
+          ? resolved.filter((a) => sep38AssetId(a) === opts.asset || a.code === opts.asset)
+          : resolved;
+
+        // Each (anchor, asset) goes through the same estimate the on-ramp hop
+        // uses, with the /info already loaded, so the two cannot drift apart.
         await Promise.all(
-          assets.map(async ({ code, issuer, assetInfo }) => {
+          wanted.map(async (asset) => {
             try {
               rates.push(
-                await buildDepositRow(
-                  anchor,
-                  { code, issuer },
-                  assetInfo,
-                  fiatCode,
-                  fiatAmountNum,
+                await estimateDepositForAnchor(anchor, asset, fiatCode, fiatAmount, {
                   corridorId,
-                  deps
-                )
+                  info,
+                  ...(opts.type !== undefined ? { type: opts.type } : {}),
+                  deps,
+                })
               );
             } catch (err) {
               errors.push({
                 anchorId: anchor.id,
                 anchorName: anchor.name,
-                reason: `${code}: ${errorMessage(err)}`,
+                reason: `${asset.code}: ${errorMessage(err)}`,
               });
             }
           })

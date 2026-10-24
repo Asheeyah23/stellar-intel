@@ -216,6 +216,9 @@ describe('/onramp page (ONR032)', () => {
         account: PUBLIC_KEY,
       })
     );
+    // The input is in fiat, but SEP-24 reads `amount` in asset units, so the
+    // anchor's interactive flow collects the amount instead.
+    expect(mockInitiateDeposit.mock.calls[0]![1]).not.toHaveProperty('amount');
     expect(mockSignIntent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'onramp',
@@ -252,10 +255,10 @@ describe('/onramp page (ONR032)', () => {
       signature: 'c2lnbmF0dXJl',
       publicKey: PUBLIC_KEY,
     });
-    expect(body.quotedRate).toBe(String(COMPARISON.rates[0]!.exchangeRate));
+    expect(Number(body.quotedRate)).toBeCloseTo(COMPARISON.rates[0]!.exchangeRate!, 9);
   });
 
-  it('still tracks and appends unsigned, with no error, when the user rejects the signature', async () => {
+  it('still tracks the deposit but posts no outcome when the user rejects the signature', async () => {
     const fetchFn = stubAppendFetch();
     mockSignIntent.mockRejectedValue(new IntentSignError('User declined', 'SIGN_REJECTED'));
     const user = userEvent.setup();
@@ -267,12 +270,8 @@ describe('/onramp page (ONR032)', () => {
     await waitFor(() => expect(screen.queryAllByText(/deposit-tx-1/).length).toBeGreaterThan(0));
     // …no error is surfaced…
     expect(screen.queryByRole('alert')).toBeNull();
-    // …and the terminal outcome is still appended, unsigned.
-    await waitFor(() => expect(appendCalls(fetchFn)).toHaveLength(1), { timeout: 10_000 });
-    const body = appendCalls(fetchFn)[0]!;
-    expect(body.direction).toBe('deposit');
-    expect(typeof body.intentHash).toBe('string');
-    expect('signature' in body).toBe(false);
-    expect('publicKey' in body).toBe(false);
+    // …and no unsigned outcome is posted: the append route would answer 401.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(appendCalls(fetchFn)).toHaveLength(0);
   });
 });

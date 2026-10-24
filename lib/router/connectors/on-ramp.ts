@@ -9,7 +9,11 @@
  */
 
 import { getResolvedAnchorById } from '@/lib/stellar/anchors';
-import { estimateDepositForAnchor, NoDepositRateError } from '@/lib/stellar/deposit-rates';
+import {
+  estimateDepositForAnchor,
+  InvalidDepositAmountError,
+  NoDepositRateError,
+} from '@/lib/stellar/deposit-rates';
 import { initiateDeposit } from '@/lib/stellar/sep24';
 import type {
   DepositRate,
@@ -36,7 +40,7 @@ export interface OnRampHopParams {
  *
  * `plan` estimates the on-chain asset the user will receive for a fiat input
  * through `estimateDepositForAnchor` -- the same engine behind
- * `fetchDepositRates`, so the hop and the /onramp comparison table produce
+ * `fetchDepositRates`, so the hop and the deposit comparison produce
  * identical figures for identical inputs (#1496). An estimate, not a firm
  * quote, exactly like the existing sep24-fee rate path.
  *
@@ -83,6 +87,14 @@ export function createOnRampHop(params: OnRampHopParams): Hop {
           { type: feeType }
         );
       } catch (err) {
+        if (err instanceof InvalidDepositAmountError) {
+          return {
+            ok: false,
+            hopId,
+            error: 'amount_too_small',
+            details: err.message,
+          };
+        }
         if (err instanceof NoDepositRateError) {
           return {
             ok: false,

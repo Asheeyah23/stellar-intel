@@ -22,6 +22,10 @@ The entry points expose the full tool set:
 | `intel.leaderboard`       | ✓                   | ✓              | ✓                             |
 | `intel.corridors`         | ✓                   | ✓              | ✓                             |
 
+The on-ramp tools `intel.onramp.quote` and `intel.onramp.prepare` are
+specified but **not registered on any transport** — see
+[Planned: on-ramp tools](#planned-on-ramp-tools) below.
+
 **Scope:** Stellar Intel abstracts anchors, not chains. These tools answer
 "what's my best fiat exit price, and which Stellar anchor should I trust to
 execute it" — not "move this value across chains." For cross-chain pay/bridge
@@ -323,6 +327,29 @@ Flag-gated corridors hidden in the UI are omitted.
 
 - **Input:** none
 - **Output:** `{ count: number, corridors: CorridorSummary[] }`
+
+### Planned: on-ramp tools
+
+Two on-ramp tools are specified but not yet registered on any transport. Both
+would be annotated `readOnlyHint: true` and both take an on-ramp intent
+([`docs/INTENT_API.md`](INTENT_API.md)) rather than an off-ramp one.
+
+- **`intel.onramp.quote`** — an indicative quote across anchors.
+  **Input:** `{ sourceAsset, destinationAsset, amount, depositMethod }`.
+  **Output:** `{ anchor, quoteId, sourceAmount, destinationAmount, rate, fee, expiresAt }`,
+  an estimate derived from the anchor's published fee schedule — never a firm
+  quote. See [docs/ONRAMP.md](ONRAMP.md) for what "indicative" means.
+- **`intel.onramp.prepare`** — the unsigned on-ramp intent plus the anchor
+  handoff URL. **Input:** an `OnrampIntent` without a signature.
+  **Output:** `{ unsignedEnvelope: { intent, intentHash }, handoffUrl }`, where
+  `handoffUrl` is the anchor's hosted SEP-24 deposit page.
+
+**There is no on-ramp execute tool, by design: on-ramp KYC is browser-only.**
+Unlike the off-ramp `intel.execute`, an on-ramp cannot be completed by signing
+and submitting a Stellar transaction. The user must authenticate with the
+anchor (SEP-10) and complete identity verification and payment inside the
+anchor's hosted SEP-24 page. An agent can quote and prepare; the human
+finishes the deposit. Stellar Intel never sees the KYC data or the fiat leg.
 
 ## Prompts
 

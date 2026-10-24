@@ -14,9 +14,11 @@ import * as anchors from '@/lib/stellar/anchors';
 import {
   estimateDepositForAnchor,
   fetchDepositRates,
+  InvalidDepositAmountError,
   NoDepositRateError,
   type DepositRateDeps,
 } from '@/lib/stellar/deposit-rates';
+import { serverRatesConfig } from '@/lib/stellar/server-rates';
 import type { Sep24InfoResponse } from '@/lib/stellar/sep24';
 import type { Anchor, Corridor, Sep1TomlData } from '@/types';
 
@@ -169,6 +171,114 @@ describe('fetchDepositRates', () => {
     expect(result.rates.map((r) => r.asset)).toEqual([USDC_ID]);
   });
 
+  describe('anchors that key /info by bare asset code', () => {
+    it('takes the issuer from the registry, so USDC is not labelled native', async () => {
+      mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A]);
+      const deps = makeDeps(
+        { 'https://a.example.com/sep24': infoWith({ USDC: { enabled: true } }) },
+        { USDC: 1500 }
+      );
+
+      const result = await fetchDepositRates('usdc-ngn', '150000', { deps });
+
+      expect(result.errors).toEqual([]);
+      expect(result.rates.map((r) => r.asset)).toEqual([USDC_ID]);
+      expect(deps.referenceMidPrice).toHaveBeenCalledWith(
+        { code: 'USDC', issuer: USDC_ISSUER },
+        'NGN'
+      );
+    });
+
+    it('matches opts.asset given as a SEP-38 identifier', async () => {
+      mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A]);
+      const deps = makeDeps(
+        { 'https://a.example.com/sep24': infoWith({ USDC: { enabled: true } }) },
+        { USDC: 1500 }
+      );
+
+      const result = await fetchDepositRates('usdc-ngn', '150000', { deps, asset: USDC_ID });
+
+      expect(result.rates.map((r) => r.asset)).toEqual([USDC_ID]);
+    });
+
+    it('takes the issuer of a non-primary asset from a corridor the anchor serves', async () => {
+      const NGNC_ISSUER = 'GDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const ngnc: Corridor = {
+        ...CORRIDOR,
+        id: 'ngnc-ngn',
+        from: 'NGNC',
+        fromIssuer: NGNC_ISSUER,
+        fromPeg: 'NGN',
+      };
+      mockGetCorridorById.mockImplementation((id: string) => {
+        if (id === CORRIDOR.id) return CORRIDOR;
+        if (id === ngnc.id) return ngnc;
+        throw new Error(`Unknown corridor: ${id}`);
+      });
+      const anchor: Anchor = { ...ANCHOR_A, corridors: ['usdc-ngn', 'ngnc-ngn'] };
+      mockGetAnchorsByCorridorId.mockReturnValue([anchor]);
+      const deps = makeDeps(
+        { 'https://a.example.com/sep24': infoWith({ NGNC: { enabled: true } }) },
+        { NGNC: 1 }
+      );
+
+      const result = await fetchDepositRates('usdc-ngn', '150000', { deps });
+
+      expect(result.rates.map((r) => r.asset)).toEqual([`stellar:NGNC:${NGNC_ISSUER}`]);
+    });
+
+    it('records an error instead of quoting an unknown code as native XLM', async () => {
+      mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A]);
+      const deps = makeDeps(
+        { 'https://a.example.com/sep24': infoWith({ MYSTERY: { enabled: true } }) },
+        { MYSTERY: 1 }
+      );
+
+      const result = await fetchDepositRates('usdc-ngn', '150000', { deps });
+
+      expect(result.rates).toEqual([]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]!.reason).toContain('MYSTERY');
+      expect(result.errors[0]!.reason).toContain('no issuer');
+    });
+
+    it('still prices native XLM, which has no issuer', async () => {
+      mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A]);
+      const deps = makeDeps(
+        { 'https://a.example.com/sep24': infoWith({ native: { enabled: true } }) },
+        { XLM: 500 }
+      );
+
+      const result = await fetchDepositRates('usdc-ngn', '150000', { deps });
+
+      expect(result.rates.map((r) => r.asset)).toEqual(['stellar:native']);
+    });
+  });
+
+  it('gives up on a hung /info instead of stalling the comparison', async () => {
+    const before = { ...serverRatesConfig.sep24Info };
+    serverRatesConfig.sep24Info.timeoutMs = 20;
+    serverRatesConfig.sep24Info.retryAttempts = 0;
+    try {
+      mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A, ANCHOR_B]);
+      const deps = makeDeps(
+        { 'https://b.example.com/sep24': infoWith({ [USDC_ID]: { enabled: true } }) },
+        { USDC: 1500 }
+      );
+      deps.getSep24Info = vi.fn(async (transferServer: string) => {
+        if (transferServer === 'https://a.example.com/sep24') return new Promise<never>(() => {});
+        return infoWith({ [USDC_ID]: { enabled: true } });
+      });
+
+      const result = await fetchDepositRates('usdc-ngn', '150000', { deps });
+
+      expect(result.rates.map((r) => r.anchorId)).toEqual(['anchor-b']);
+      expect(result.errors.map((e) => e.anchorId)).toEqual(['anchor-a']);
+    } finally {
+      Object.assign(serverRatesConfig.sep24Info, before);
+    }
+  });
+
   it('excludes assets the anchor disables', async () => {
     mockGetAnchorsByCorridorId.mockReturnValue([ANCHOR_A]);
     const deps = makeDeps(
@@ -299,5 +409,33 @@ describe('estimateDepositForAnchor', () => {
         deps,
       })
     ).rejects.toThrow('does not enable USDC deposits');
+  });
+  it('throws InvalidDepositAmountError for an amount that is not a positive number', async () => {
+    const deps = makeDeps(
+      { 'https://a.example.com/sep24': infoWith({ [USDC_ID]: { enabled: true } }) },
+      { USDC: 1500 }
+    );
+
+    await expect(
+      estimateDepositForAnchor(ANCHOR_A, { code: 'USDC', issuer: USDC_ISSUER }, 'NGN', 'abc', {
+        deps,
+      })
+    ).rejects.toBeInstanceOf(InvalidDepositAmountError);
+  });
+
+  it('uses a pre-loaded /info without fetching the TOML or /info again', async () => {
+    const deps = makeDeps({}, { USDC: 1500 });
+
+    const rate = await estimateDepositForAnchor(
+      ANCHOR_A,
+      { code: 'USDC', issuer: USDC_ISSUER },
+      'NGN',
+      '150000',
+      { deps, info: infoWith({ [USDC_ID]: { enabled: true } }) }
+    );
+
+    expect(rate.asset).toBe(USDC_ID);
+    expect(deps.resolveAnchor).not.toHaveBeenCalled();
+    expect(deps.getSep24Info).not.toHaveBeenCalled();
   });
 });

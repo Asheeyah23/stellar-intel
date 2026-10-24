@@ -2,18 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { TERMINAL_STATES, getSep24Transaction } from '@/lib/stellar/sep24';
 import type { Sep24Transaction, WithdrawStatusValue } from '@/types';
-import type { OutcomeStatus } from '@/types/reputation';
+import type { OutcomeDirection, OutcomeStatus } from '@/types/reputation';
 
 /**
  * Context the page supplies so a terminal outcome can be logged (#129/#220).
  *
  * `signature` is the sender's Freighter signature over `intentHash` (see
  * `lib/intent/sign.ts`) and `publicKey` the account that produced it. Both
- * are public values — no key material is ever part of this context. They are
- * optional (ONR032): when the user declines the signature the outcome is
- * still appended unsigned, and the server decides whether to accept it as an
- * unattested row. `direction` separates on-ramp deposits from off-ramp
- * withdrawals (ONR031); omitted, the server defaults it to 'withdraw'.
+ * are public values — no key material is ever part of this context. Both are
+ * required: the append route rejects an unsigned outcome with 401 (#1267), so
+ * a caller with no signature must not set a context at all. `direction`
+ * separates on-ramp deposits from off-ramp withdrawals (ONR031); omitted, the
+ * server defaults it to 'withdraw'.
  */
 export interface OutcomeAppendContext {
   intentHash: string;
@@ -21,9 +21,9 @@ export interface OutcomeAppendContext {
   corridor: string;
   quotedRate: string;
   quotedAmount: string;
-  direction?: 'withdraw' | 'deposit';
-  publicKey?: string;
-  signature?: string;
+  direction?: OutcomeDirection;
+  publicKey: string;
+  signature: string;
 }
 
 function outcomeFromStatus(status: WithdrawStatusValue): OutcomeStatus {

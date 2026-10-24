@@ -1,6 +1,6 @@
 # Intent API
 
-**Last reviewed:** 2026-08-26
+**Last reviewed:** 2026-10-19
 
 The off-ramp intent is the core primitive of Stellar Intel. A user expresses
 _what_ they want — "withdraw this USDC to this corridor" — and MAY sign it with
@@ -9,51 +9,72 @@ canonical payload before routing; unsigned intents are still accepted (the
 signature is an optional attestation, not a gate). The user never hands over a
 key; they sign a canonical payload.
 
-Source of truth: [`types/intent.ts`](../types/intent.ts),
-[`lib/intent/`](../lib/intent/), and the route
+Source of truth: [`lib/intent/offramp.ts`](../lib/intent/offramp.ts),
+[`types/intent.ts`](../types/intent.ts), [`lib/intent/`](../lib/intent/), and the route
 [`app/api/intent/offramp/route.ts`](../app/api/intent/offramp/route.ts).
 
-## Payload — `OfframpIntent`
+## Payload — `IntentSchema`
 
-The inner object describing one off-ramp operation
-(`OfframpIntentSchema` in `types/intent.ts`):
+The off-ramp intent payload parsed by `POST /api/intent/offramp`.
+Source of truth: `IntentSchema` in [`lib/intent/offramp.ts`](../lib/intent/offramp.ts).
 
-| Field        | Type   | Rule                                              |
-| ------------ | ------ | ------------------------------------------------- |
-| `anchorId`   | string | Non-empty; an id from `constants/anchors.ts`.     |
-| `corridorId` | string | Non-empty; a corridor id (e.g. `usdc-ngn`).       |
-| `amount`     | string | Positive decimal, ≤ 7 dp (`/^\d+(\.\d{1,7})?$/`). |
-| `publicKey`  | string | Stellar public key (`G…`, 56 chars).              |
+| Field              | Type   | Rule                                                                                              |
+| ------------------ | ------ | ------------------------------------------------------------------------------------------------- |
+| `type`             | string | Literal `'offramp'`.                                                                              |
+| `sourceAsset`      | string | Asset code being sold (min length 1, e.g. `"USDC"`).                                              |
+| `destinationAsset` | string | Destination fiat/asset code being received (min length 1, e.g. `"NGN"`).                          |
+| `amount`           | string | Positive decimal string matching `AMOUNT_PATTERN` from `lib/patterns.ts` (`/^\d+(\.\d{1,7})?$/`). |
+| `sender`           | string | Originating Stellar address or account (min length 1).                                            |
+| `recipient`        | string | Payout destination identifier (min length 1).                                                     |
 
-## Signed envelope — `SignedIntentEnvelope`
+Signed intents MAY also include the optional replay-protection fields:
 
-The wire format the server accepts (`SignedIntentEnvelopeSchema`). Construction:
+- `nonce` (optional string): exactly 32 hex characters (`/^[0-9a-f]{32}$/i`), providing 128 bits of randomness.
+- `deadline` (optional string): ISO 8601 datetime string (`z.iso.datetime()`).
 
-1. **Canonicalize** the `intent` — keys sorted recursively, then `JSON.stringify`
-   (see [`docs/CANONICAL_JSON.md`](CANONICAL_JSON.md) and `lib/intent/`).
-2. **Hash** the canonical bytes — SHA-256 → `hash` (lowercase hex, 64 chars).
-3. **Sign** the canonical JSON bytes — Ed25519 via Freighter → `signature` (base64).
-4. Include the matching Stellar `publicKey` returned by Freighter.
+Both fields are part of the canonical intent schema and covered by the signature when present.
+
+## Signed envelope — Wire format
+
+The route accepts a **flat JSON object** containing the intent fields above, plus optional top-level `signature` and `publicKey` attestation fields. Both attestation fields must be supplied together:
+
+| Field       | Type   | Rule                                                            |
+| ----------- | ------ | --------------------------------------------------------------- |
+| `signature` | string | Optional base64-encoded Ed25519 signature over the intent hash. |
+| `publicKey` | string | Optional Stellar public key (`G…`, 56 chars).                   |
+
+### Construction
+
+1. **Canonicalize** the intent — sort keys recursively, then serialize with `canonicalJson` (in [`lib/intent/hash.ts`](../lib/intent/hash.ts); see [`docs/CANONICAL_JSON.md`](CANONICAL_JSON.md)).
+2. **Hash** the canonical JSON bytes — compute SHA-256 via `hashIntent` ([`lib/intent/hash.ts`](../lib/intent/hash.ts)) to produce `intentHash` (a 64-character lowercase hex string).
+3. **Sign** the hex hash — sign the hex string via Freighter's `signMessage` ([`lib/intent/sign.ts`](../lib/intent/sign.ts)), which returns a base64 signature and the signer's public key.
+4. **Submit** the flat payload containing the intent fields together with `signature` and `publicKey`.
+
+### Verification
+
+On the server, `verifyOptionalIntentAttestation` in [`lib/intent/verify.ts`](../lib/intent/verify.ts) reads `signature` and `publicKey` off the root of the raw request body:
+
+- If neither is provided, the intent is accepted as an unattested intent (`attested: false`).
+- If only one is provided, the request is rejected with **400** (`VALIDATION_ERROR`).
+- If both are present, the server recalculates `hashIntent(intent)` and calls `verifyIntentSignature`:
+  - It decodes the 64-char hex hash into raw bytes (`Buffer.from(intentHash, 'hex')`) and verifies the Ed25519 signature (`keypair.verify(messageBytes, sigBytes)`).
+  - It also accepts SEP-53 domain-separated messages (`keypair.verifyMessage(intentHash, sigBytes)`), matching Freighter's `signMessage`.
+  - If neither verifies, the request is rejected with **401** (`UNAUTHORIZED`).
 
 ```jsonc
 {
-  "intent": {
-    "anchorId": "cowrie",
-    "corridorId": "usdc-ngn",
-    "amount": "100",
-    "publicKey": "GAB…",
-  },
-  "hash": "<64-char lowercase hex sha-256 of canonical intent>",
+  "type": "offramp",
+  "sourceAsset": "USDC",
+  "destinationAsset": "NGN",
+  "amount": "100.00",
+  "sender": "GBBD67IFNZMSW54QOX7SZOCBWW5HDKG54G7QOWPHNHOC4YDTQG2Z4O2U",
+  "recipient": "08012345678",
+  "nonce": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "deadline": "2026-10-19T12:00:00Z",
   "signature": "<base64 ed25519 signature>",
-  "publicKey": "GAB…",
+  "publicKey": "GBBD67IFNZMSW54QOX7SZOCBWW5HDKG54G7QOWPHNHOC4YDTQG2Z4O2U",
 }
 ```
-
-When a `signature` + `publicKey` are supplied, the server recomputes the
-canonical hash and verifies the Ed25519 signature (`lib/intent/verify.ts`,
-`verifyOptionalIntentAttestation`) before routing — a forged or tampered signed
-intent is rejected at the boundary (401). Supplying only one of the two is a 400.
-Omitting both is allowed and routes the intent unattested.
 
 ## Replay protection
 
@@ -85,8 +106,20 @@ of replay protection.
 ```http
 POST /api/intent/offramp
 Content-Type: application/json
+Idempotency-Key: <optional-unique-string>
+```
 
-<SignedIntentEnvelope>
+Request body:
+
+```jsonc
+{
+  "type": "offramp",
+  "sourceAsset": "USDC",
+  "destinationAsset": "NGN",
+  "amount": "100.00",
+  "sender": "GBBD67IFNZMSW54QOX7SZOCBWW5HDKG54G7QOWPHNHOC4YDTQG2Z4O2U",
+  "recipient": "08012345678",
+}
 ```
 
 - **200** — intent accepted for routing (signature verified when one was supplied).
@@ -96,26 +129,101 @@ Content-Type: application/json
 - **409** — the signed intent's `nonce` has already been used for that `publicKey`.
 - **410** — the signed intent's `deadline` has already passed.
 
+Header:
+
+- `Idempotency-Key` (optional string): When provided, repeated requests with the same key return the cached idempotent response (`lib/api/idempotency.ts`).
+
 ```bash
 curl -sX POST https://stellar-intel.vercel.app/api/intent/offramp \
   -H 'content-type: application/json' \
-  -d @signed-intent.json
+  -H 'Idempotency-Key: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d' \
+  -d '{
+    "type": "offramp",
+    "sourceAsset": "USDC",
+    "destinationAsset": "NGN",
+    "amount": "100.00",
+    "sender": "GBBD67IFNZMSW54QOX7SZOCBWW5HDKG54G7QOWPHNHOC4YDTQG2Z4O2U",
+    "recipient": "08012345678"
+  }'
 ```
+
+## On-ramp — `POST /api/v1/intent/onramp`
+
+> **Status.** The `OnrampIntent` schema below is shipped
+> (`OnrampIntentSchema` in [`types/intent.ts`](../types/intent.ts), re-exported
+> from [`lib/intent/onramp-schema.ts`](../lib/intent/onramp-schema.ts)). The
+> endpoint itself is **not live yet**; the request body is final, the response
+> fields are the planned contract. The full deposit flow — preflight/trustline,
+> SEP-10, interactive deposit, payment, tracking — is in
+> [`docs/ONRAMP.md`](ONRAMP.md).
+
+The on-ramp intent is the mirror image of the off-ramp intent: the user pays in
+fiat and the anchor credits a Stellar asset. It is a distinct schema with
+`type: "onramp"` (not a `CanonicalIntentV1` `kind`), and it carries the
+Stellar `destination` that the anchor credits, which the off-ramp's free-form
+`recipient` does not.
+
+### Payload — `OnrampIntent`
+
+| Field              | Type   | Required | Rule                                                                   |
+| ------------------ | ------ | -------- | ---------------------------------------------------------------------- |
+| `type`             | string | yes      | Literal `"onramp"` — the off-ramp discriminator is rejected.           |
+| `sourceAsset`      | string | yes      | Non-empty; the fiat paid in (e.g. `NGN`).                              |
+| `destinationAsset` | string | yes      | Non-empty; the Stellar asset bought (e.g. `USDC`).                     |
+| `amount`           | string | yes      | Positive decimal string (`/^\d+(\.\d+)?$/`, `parseFloat > 0`).         |
+| `sender`           | string | yes      | Non-empty; the fiat rail's reference (bank account, wallet, agent id). |
+| `destination`      | string | yes      | Stellar public key (`G…`, 56 chars); rejects muxed `M…` accounts.      |
+| `depositMethod`    | enum   | yes      | `bank_transfer`, `cash`, `mobile_money` or `card`.                     |
+| `memo`             | string | no       | Non-empty when present; attributing memo for pooled-account anchors.   |
+| `memoType`         | enum   | no       | `text`, `id` or `hash`; required together with `memo`.                 |
+
+Memo rules (enforced by `superRefine`): `memo` and `memoType` must be supplied
+together; a `text` memo must be at most 28 bytes once UTF-8 encoded; an `id`
+memo must be an unsigned 64-bit integer; a `hash` memo must be 64 lowercase
+hex characters. A `type` of `"offramp"` is rejected, as is a non-`G…`
+`destination`.
+
+```jsonc
+// request
+{
+  "type": "onramp",
+  "sourceAsset": "NGN",
+  "destinationAsset": "USDC",
+  "amount": "150000.00",
+  "sender": "NG123456789012345678",
+  "destination": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+  "depositMethod": "bank_transfer",
+}
+// response (planned)
+{
+  "intentId": "onramp_intent_9a4f21",
+  "status": "pending_trustline",
+  "unsignedChangeTrustXdr": "AAAAAgAAAABn...",
+  "handoffUrl": "https://cowrie.exchange/sep24/deposit?transaction_id=...",
+  "createdAt": "2026-10-17T12:05:00Z",
+}
+```
+
+The planned response returns a `handoffUrl` (the anchor's hosted SEP-24
+deposit page) and, when the destination lacks a trustline for the asset, an
+`unsignedChangeTrustXdr` for the user to sign. `unsignedChangeTrustXdr` is
+`null` when no trustline change is needed. Neither field is produced today.
 
 ## `IntentV1` — canonical router primitive
 
 `types/intent.ts` also exports `IntentV1Schema` / `IntentV1` (re-exported from
 `lib/intent/schema.ts`), the richer canonical intent the router consumes. The
 off-ramp envelope above is the v1 path wired into the UI today; `IntentV1` is the
-shape the multi-anchor router (see [`docs/ROADMAP.md`](ROADMAP.md), Wave 1.2 /
-v2.2) scores and splits across anchors.
+shape the multi-anchor router (see [Wave 1.2 — Router + Seeds](ROADMAP.md#wave-12--router--seeds))
+scores and splits across anchors.
 
-## Canonical Intent V1 — versioned superset
+## Canonical Intent V1 — type definitions (not accepted by `/api/intent/offramp`)
 
-`CanonicalIntentV1Schema` in `types/intent.ts` is the **versioned superset** that
-covers all intent kinds in one discriminated union. It is what `POST /api/intent/offramp`
-parses after #817. Off-ramp-only clients that omit `kind` are accepted unchanged; the
-endpoint injects `kind: "offramp"` automatically.
+`CanonicalIntentV1Schema` and its related schemas are defined in `types/intent.ts`
+and re-exported from `lib/intent/schema.ts` for router and SDK use. They are not
+accepted by `POST /api/intent/offramp`, which accepts only the flat `IntentSchema`
+shape documented above. Sending `kind` without `type: "offramp"` to this endpoint
+returns 400 `VALIDATION_ERROR`.
 
 ### Common fields (all kinds)
 
@@ -131,8 +239,7 @@ endpoint injects `kind: "offramp"` automatically.
 
 ### `kind: "offramp"` (single off-ramp)
 
-Backwards-compatible with legacy clients that send `type: "offramp"` or omit `kind`.
-No additional fields beyond the common base.
+Represents a single off-ramp using the common fields, with `kind` set to `"offramp"`.
 
 ```jsonc
 {
@@ -194,8 +301,7 @@ Each `IntentHop`:
 
 ### `kind: "recurring"` (scheduled)
 
-Repeats a payment on a cron schedule. The endpoint will reject this kind with
-`501 NOT_IMPLEMENTED` until the scheduler service is wired up.
+Represents a payment that repeats on a cron schedule.
 
 Additional field:
 
@@ -230,5 +336,6 @@ Additional field:
 ## Related
 
 - [`docs/CANONICAL_JSON.md`](CANONICAL_JSON.md) — the exact canonicalization rules.
+- [`docs/ONRAMP.md`](ONRAMP.md) — the on-ramp flow and its planned endpoints.
 - [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — where the intent sits in the flow.
 - [`docs/ANCHOR_REPUTATION.md`](ANCHOR_REPUTATION.md) — how outcomes feed scoring.

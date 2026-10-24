@@ -34,7 +34,7 @@ interface AmountInputProps {
   isBalanceLoading?: boolean;
   /** Selects corridor-specific "typical amount" chips when defined; falls back to defaults otherwise. */
   corridorId?: string;
-  /** Source asset code the amount is denominated in. Defaults to USDC. */
+  /** Source asset code the amount is denominated in. */
   assetCode?: string;
 }
 

@@ -12,8 +12,7 @@ import { VISIBLE_CORRIDORS } from '@/constants/anchors';
 import { getCorridorById, getResolvedAnchorById } from '@/lib/stellar/anchors';
 import { initiateDeposit } from '@/lib/stellar/sep24';
 import { authenticate } from '@/lib/stellar/sep10';
-import { hashIntent } from '@/lib/intent/hash';
-import { signIntent, IntentSignError } from '@/lib/intent/sign';
+import { signIntent } from '@/lib/intent/sign';
 import type { OnrampIntent } from '@/types/intent';
 import type { DepositRate } from '@/types';
 
@@ -120,8 +119,9 @@ function OnrampContent() {
   /**
    * ONR032: once the anchor session exists, bind this deposit to the wallet by
    * signing the onramp intent with Freighter. A declined signature
-   * (SIGN_REJECTED) must not lose the deposit: it is still tracked and its
-   * outcome appended unsigned, with no error surfaced.
+   * (SIGN_REJECTED) must not lose the deposit: it is still tracked, but no
+   * outcome context is set (the append route rejects unsigned outcomes) and no
+   * error is surfaced, exactly as /offramp does.
    */
   const onDepositStarted = useCallback(
     async (row: DepositRate, transactionId: string) => {
@@ -143,7 +143,7 @@ function OnrampContent() {
       const quote = {
         anchorId: row.anchorId,
         corridor: corridorId,
-        quotedRate: String(row.exchangeRate),
+        quotedRate: row.exchangeRate.toFixed(10).replace(/\.?0+$/, ''),
         quotedAmount: amount,
         direction: 'deposit' as const,
       };
@@ -151,13 +151,8 @@ function OnrampContent() {
       try {
         const { intentHash, signature, publicKey: signer } = await signIntent(hashedIntent);
         setOutcomeContext({ ...quote, intentHash, signature, publicKey: signer });
-      } catch (err) {
-        if (err instanceof IntentSignError && err.code === 'SIGN_REJECTED') {
-          const intentHash = await hashIntent(hashedIntent);
-          setOutcomeContext({ ...quote, intentHash });
-          return;
-        }
-        // Any other signing failure is best-effort, like the off-ramp page:
+      } catch {
+        // A declined or failed signature is best-effort, like the off-ramp page:
         // the deposit itself proceeds, its outcome simply isn't recorded.
       }
     },
@@ -181,7 +176,6 @@ function OnrampContent() {
           jwt: auth.jwt,
           assetCode,
           assetIssuer,
-          amount,
           account: publicKey,
         });
 
@@ -199,7 +193,7 @@ function OnrampContent() {
         setDepositingAnchorId(null);
       }
     },
-    [publicKey, depositDisabled, amount, onDepositStarted]
+    [publicKey, depositDisabled, onDepositStarted]
   );
 
   const handleDepositAnother = useCallback(() => {
