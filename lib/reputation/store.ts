@@ -1,5 +1,6 @@
 import type {
   LatencyPercentiles,
+  OutcomeDirection,
   OutcomeLogRow,
   ProbeKind,
   ProbeLedgerRow,
@@ -21,6 +22,12 @@ export const PROBE_RETENTION_DAYS = 90;
 export interface OutcomeQuery {
   anchorId?: string;
   corridor?: string;
+  /**
+   * Restrict to one transfer direction (ONR031). Off-ramp scorecards, the
+   * leaderboard and oracle rates must pass `'withdraw'`, or deposit rows on
+   * the same corridor id would be counted as withdrawals.
+   */
+  direction?: OutcomeDirection;
   /** Only rows that are settled but not yet reconciled (delivery still null). */
   pendingReconciliationOnly?: boolean;
   /**
@@ -112,6 +119,7 @@ function matches(row: OutcomeLogRow, filter: OutcomeQuery): boolean {
   if (!filter.includeUnattested && !row.attested) return false;
   if (filter.anchorId && row.anchorId !== filter.anchorId) return false;
   if (filter.corridor && row.corridor !== filter.corridor) return false;
+  if (filter.direction && row.direction !== filter.direction) return false;
   if (filter.pendingReconciliationOnly) {
     if (row.deliveredAmount !== null || row.reconciledAt !== null) return false;
     if (!row.stellarTransactionId) return false;

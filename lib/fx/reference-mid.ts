@@ -1,5 +1,5 @@
 import { USDC_ASSET } from '@/constants/anchors';
-import { getUsdFxRate as fetchUsdFxRate } from '@/lib/fx/rates';
+import { getFxRate as fetchFxRate, getUsdFxRate as fetchUsdFxRate } from '@/lib/fx/rates';
 import { getOrderBook as fetchOrderBook, type OrderBookData } from '@/lib/stellar/horizon';
 
 /**
@@ -9,17 +9,16 @@ import { getOrderBook as fetchOrderBook, type OrderBookData } from '@/lib/stella
  *
  * - USDC is treated as exactly 1 USD and converted with the open.er-api
  *   USD→fiat rate (`source: 'fx'`).
+ * - An asset with a fiat peg (a corridor's `fromPeg`, e.g. NGNC→NGN, ARST→ARS)
+ *   is priced as `getFxRate(peg, fiat)` (`source: 'fx'`).
  * - Any other asset is priced off the SDEX order book against USDC — the
  *   (best bid + best ask) / 2 mid — then converted with the same USD→fiat
  *   rate (`source: 'sdex+fx'`). An empty side or a spread wider than 5% is
  *   an error, never a silently bad price.
- *
- * Pegged-asset routing (corridors with a `fromPeg`, per ANC001/ANC013) is the
- * caller's: a caller that knows the peg should use `getFxRate(peg, fiat)`
- * directly and only fall through to this helper for unpegged assets like XLM.
  */
 
 export interface ReferenceMidDeps {
+  getFxRate?: typeof fetchFxRate;
   getUsdFxRate?: typeof fetchUsdFxRate;
   getOrderBook?: typeof fetchOrderBook;
 }
@@ -51,10 +50,11 @@ function bestBidAsk(book: OrderBookData): { bid: number; ask: number } {
 }
 
 export async function referenceMidPrice(
-  asset: { code: string; issuer: string | null },
+  asset: { code: string; issuer: string | null; peg?: string | null },
   fiatCode: string,
   deps: ReferenceMidDeps = {}
 ): Promise<ReferenceMidPrice> {
+  const getFxRate = deps.getFxRate ?? fetchFxRate;
   const getUsdFxRate = deps.getUsdFxRate ?? fetchUsdFxRate;
   const getOrderBook = deps.getOrderBook ?? fetchOrderBook;
 
@@ -64,6 +64,15 @@ export async function referenceMidPrice(
       price,
       source: 'fx',
       detail: `USDC treated as 1 USD × open.er-api USD→${fiatCode}`,
+    };
+  }
+
+  if (asset.peg) {
+    const price = await getFxRate(asset.peg, fiatCode);
+    return {
+      price,
+      source: 'fx',
+      detail: `${asset.code} pegged to ${asset.peg} × open.er-api ${asset.peg}→${fiatCode}`,
     };
   }
 

@@ -138,6 +138,21 @@ describe.each(backends)('ReputationStore conformance — %s backend', (_name, ma
     expect(raw.find((r) => r.intentHash === 'unsigned')?.attested).toBe(false);
   });
 
+  it('round-trips direction, defaults to withdraw, and honors the query filter (ONR031)', async () => {
+    store = make();
+    await store.append(row({ intentHash: 'w' })); // toOutcomeLogRow default
+    await store.append(row({ intentHash: 'd', direction: 'deposit' }));
+
+    const all = await store.query({});
+    expect(all.find((r) => r.intentHash === 'w')?.direction).toBe('withdraw');
+    expect(all.find((r) => r.intentHash === 'd')?.direction).toBe('deposit');
+
+    const withdrawals = await store.query({ direction: 'withdraw' });
+    expect(withdrawals.map((r) => r.intentHash)).toEqual(['w']);
+    const deposits = await store.query({ direction: 'deposit' });
+    expect(deposits.map((r) => r.intentHash)).toEqual(['d']);
+  });
+
   it('backfills delivery and drops the row from the pending-reconciliation set', async () => {
     store = make();
     await store.append(
@@ -187,6 +202,13 @@ describe('SQLite upgrade in place (migration 006)', () => {
 
       await store.append(row({ intentHash: 'new' }));
       expect((await store.query({})).map((r) => r.intentHash)).toEqual(['new']);
+
+      // ONR031 upgrade in place: the legacy row (written before the column
+      // existed) reads back as a withdrawal and the filter respects that.
+      const [legacyRow] = await store.query({ includeUnattested: true, direction: 'withdraw' });
+      expect(legacyRow?.intentHash).toBe('legacy');
+      expect(legacyRow?.direction).toBe('withdraw');
+      expect(await store.query({ includeUnattested: true, direction: 'deposit' })).toHaveLength(0);
     } finally {
       await store.close();
       rmSync(dir, { recursive: true, force: true });

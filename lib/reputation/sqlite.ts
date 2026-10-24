@@ -17,6 +17,7 @@ const CREATE_TABLE_SQL = `
     intentHash           TEXT    NOT NULL PRIMARY KEY,
     anchorId             TEXT    NOT NULL,
     corridor             TEXT    NOT NULL,
+    direction            TEXT    NOT NULL DEFAULT 'withdraw',
     quotedRate           TEXT    NOT NULL,
     deliveredRate        TEXT,
     quotedAmount         TEXT    NOT NULL,
@@ -53,6 +54,7 @@ interface OutcomeLogRowDb {
   intentHash: string;
   anchorId: string;
   corridor: string;
+  direction: string;
   quotedRate: string;
   deliveredRate: string | null;
   quotedAmount: string;
@@ -73,6 +75,7 @@ interface OutcomeLogRowDb {
 function fromDb(r: OutcomeLogRowDb): OutcomeLogRow {
   return {
     ...r,
+    direction: r.direction === 'deposit' ? 'deposit' : 'withdraw',
     outcome: r.outcome as OutcomeStatus,
     disputed: r.disputed !== 0,
     disputedReason: r.disputed_reason,
@@ -119,6 +122,10 @@ export class SqliteReputationStore implements ReputationStore {
     if (!columns.has('signerAccount')) {
       this.db.exec(`ALTER TABLE outcome_log ADD COLUMN signerAccount TEXT`);
     }
+    // ONR031: pre-existing rows are all off-ramp outcomes.
+    if (!columns.has('direction')) {
+      this.db.exec(`ALTER TABLE outcome_log ADD COLUMN direction TEXT NOT NULL DEFAULT 'withdraw'`);
+    }
   }
 
   async append(row: OutcomeLogRow): Promise<boolean> {
@@ -127,11 +134,11 @@ export class SqliteReputationStore implements ReputationStore {
     const result = this.db
       .prepare(
         `INSERT INTO outcome_log
-           (intentHash, anchorId, corridor, quotedRate, deliveredRate, quotedAmount,
+           (intentHash, anchorId, corridor, direction, quotedRate, deliveredRate, quotedAmount,
             deliveredAmount, settleSeconds, outcome, createdAt, stellarTransactionId, reconciledAt,
             disputed, disputed_reason, publishedAt, oracleTxHash, attested, signerAccount)
          VALUES
-           (@intentHash, @anchorId, @corridor, @quotedRate, @deliveredRate, @quotedAmount,
+           (@intentHash, @anchorId, @corridor, @direction, @quotedRate, @deliveredRate, @quotedAmount,
             @deliveredAmount, @settleSeconds, @outcome, @createdAt, @stellarTransactionId, @reconciledAt,
             @disputed, @disputedReason, @publishedAt, @oracleTxHash, @attested, @signerAccount)
          ON CONFLICT (intentHash) DO NOTHING`
@@ -150,6 +157,10 @@ export class SqliteReputationStore implements ReputationStore {
     if (filter.corridor) {
       where.push('corridor = @corridor');
       params['corridor'] = filter.corridor;
+    }
+    if (filter.direction) {
+      where.push('direction = @direction');
+      params['direction'] = filter.direction;
     }
     if (filter.pendingReconciliationOnly) {
       where.push(

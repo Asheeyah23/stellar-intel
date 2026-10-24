@@ -31,6 +31,23 @@ describe('AmountInput', () => {
     expect(screen.getByText(/Enter the amount of USDC/)).toBeInTheDocument();
   });
 
+  it('renders USDC in the label, suffix, balance line and hint by default', () => {
+    render(<AmountInput value="100" onChange={vi.fn()} balance={243.5} />);
+    expect(screen.getByText('Amount (USDC)')).toBeInTheDocument();
+    expect(screen.getByText('USDC')).toBeInTheDocument();
+    expect(screen.getByText('Balance: 243.5 USDC')).toBeInTheDocument();
+    expect(screen.getByText('Enter the amount of USDC to off-ramp')).toBeInTheDocument();
+  });
+
+  it('renders ARST in the label, suffix, balance line and hint when assetCode is set', () => {
+    render(<AmountInput value="100" onChange={vi.fn()} balance={243.5} assetCode="ARST" />);
+    expect(screen.getByText('Amount (ARST)')).toBeInTheDocument();
+    expect(screen.getByText('ARST')).toBeInTheDocument();
+    expect(screen.getByText('Balance: 243.5 ARST')).toBeInTheDocument();
+    expect(screen.getByText('Enter the amount of ARST to off-ramp')).toBeInTheDocument();
+    expect(screen.queryByText(/USDC/)).not.toBeInTheDocument();
+  });
+
   it('renders the wallet balance when provided', () => {
     render(<AmountInput value="100" onChange={vi.fn()} balance={243.5} />);
     expect(screen.getByText('Balance: 243.5 USDC')).toBeInTheDocument();

@@ -32,6 +32,40 @@ describe('referenceMidPrice (Q38017)', () => {
     expect(getOrderBook).not.toHaveBeenCalled();
   });
 
+  it('prices a pegged asset through getFxRate(peg, fiat) without touching the order book', async () => {
+    const getFxRate = vi.fn().mockResolvedValue(1);
+    const getUsdFxRate = vi.fn();
+    const getOrderBook = vi.fn();
+
+    const result = await referenceMidPrice({ code: 'NGNC', issuer: 'GNGNC', peg: 'NGN' }, 'NGN', {
+      getFxRate,
+      getUsdFxRate,
+      getOrderBook,
+    });
+
+    expect(result).toEqual({
+      price: 1,
+      source: 'fx',
+      detail: 'NGNC pegged to NGN × open.er-api NGN→NGN',
+    });
+    expect(getFxRate).toHaveBeenCalledWith('NGN', 'NGN');
+    expect(getUsdFxRate).not.toHaveBeenCalled();
+    expect(getOrderBook).not.toHaveBeenCalled();
+  });
+
+  it('prices a pegged asset against a different fiat with the peg cross rate', async () => {
+    const getFxRate = vi.fn().mockResolvedValue(0.00065);
+
+    const result = await referenceMidPrice({ code: 'ARST', issuer: 'GARST', peg: 'ARS' }, 'USD', {
+      getFxRate,
+      getOrderBook: vi.fn(),
+    });
+
+    expect(result.price).toBe(0.00065);
+    expect(result.source).toBe('fx');
+    expect(getFxRate).toHaveBeenCalledWith('ARS', 'USD');
+  });
+
   it('prices an unpegged asset off the SDEX mid against USDC, times FX', async () => {
     // bid 0.118, ask 0.122 → mid 0.12 USDC per XLM; × 1600 NGN per USD.
     const getUsdFxRate = vi.fn().mockResolvedValue(1600);
