@@ -14,6 +14,7 @@
 import { getLogger } from '@/lib/logger';
 import { resolveToml, validateTomlIntegrity, type TomlResult } from '@/lib/stellar/sep1';
 import { assertSep38Capable, getSep38Price, getSep38Prices } from '@/lib/stellar/sep38';
+import { getSep24Info, type Sep24InfoResponse } from '@/lib/stellar/sep24';
 import { getSep31Info, sep31ReceiveAssets } from '@/lib/stellar/sep31';
 import { getCorridorById } from '@/lib/stellar/anchors';
 import { verifyAssetOnChain } from '@/lib/stellar/horizon';
@@ -35,6 +36,7 @@ import type {
   QuoteHistoryRow,
 } from '@/types/reputation';
 import type { Anchor, Sep1TomlData, Sep31Info } from '@/types';
+import type { ReputationStore } from './store';
 
 const logger = getLogger('reputation/probe');
 
@@ -1082,6 +1084,166 @@ export async function probeAllAnchorSep31(
   return samples;
 }
 
+// ─── Deposit-availability probe (ONR029) ───────────────────────────────────────
+//
+// Every probe above measures the withdraw side. An anchor can switch deposits
+// off while withdrawals keep working, so deposit availability is its own
+// signal: one sample per SEP-24 `/info` deposit asset, tagged `deposit:<CODE>`
+// in `corridor` so it is queryable without a schema change and can never be
+// read as an uptime sample (those carry no corridor). It is not blended into
+// the withdraw score.
+
+/** Injectable dependencies for the deposit-availability probe. */
+export interface DepositProbeDeps {
+  /** Resolves an anchor's stellar.toml. Defaults to `resolveToml` from lib/stellar/sep1. */
+  fetchToml?: (domain: string) => Promise<TomlResult>;
+  /** Fetches an anchor's SEP-24 GET /info. Defaults to `getSep24Info` from lib/stellar/sep24. */
+  fetchInfo?: (transferServer: string) => Promise<Sep24InfoResponse>;
+  /** Monotonic-ish millisecond clock. Defaults to `Date.now`. */
+  now?: () => number;
+}
+
+function resolveDepositDeps(deps?: DepositProbeDeps): Required<DepositProbeDeps> {
+  return {
+    fetchToml: deps?.fetchToml ?? resolveToml,
+    fetchInfo: deps?.fetchInfo ?? getSep24Info,
+    now: deps?.now ?? Date.now,
+  };
+}
+
+/** Asset code of a SEP-24 `/info` key: a bare code, or `stellar:CODE:ISSUER`. */
+function depositAssetCode(key: string): string {
+  if (!key.startsWith('stellar:')) return key;
+  const code = key.split(':')[1] ?? key;
+  return code === 'native' ? 'XLM' : code;
+}
+
+/**
+ * Probe one anchor's SEP-24 deposit availability, recording one sample per
+ * deposit asset in `/info`. `reachable` is `info.enabled === true`; a disabled
+ * asset is recorded unreachable with `failureType: 'unknown'` and
+ * `error: 'deposit disabled for <CODE>'`.
+ *
+ * An anchor with no deposit entries is recorded as disabled for its registered
+ * `assetCode`, until the multi-asset registry supplies a better list. A TOML
+ * without `TRANSFER_SERVER_SEP0024`, or a probe that could not complete, records
+ * one unreachable sample for the registered asset, classified like the other
+ * probes. Network failures are caught, never thrown.
+ */
+export async function probeDepositAvailability(
+  anchor: Anchor,
+  store: ProbeSampleStore,
+  deps?: DepositProbeDeps
+): Promise<ProbeSample[]> {
+  const { fetchToml, fetchInfo, now } = resolveDepositDeps(deps);
+  const domain = anchor.serviceDomain ?? anchor.homeDomain;
+  const start = now();
+
+  let assets: Array<{ code: string; enabled: boolean }> | null = null;
+  let error: string | undefined;
+
+  try {
+    const tomlResult = await fetchToml(domain);
+    if (!tomlResult.ok) {
+      error = tomlResult.error;
+    } else if (!tomlResult.data.TRANSFER_SERVER_SEP0024) {
+      error = `${domain} does not advertise TRANSFER_SERVER_SEP0024`;
+    } else {
+      const info = await fetchInfo(tomlResult.data.TRANSFER_SERVER_SEP0024);
+      assets = Object.entries(info.deposit ?? {}).map(([key, asset]) => ({
+        code: depositAssetCode(key),
+        enabled: asset?.enabled === true,
+      }));
+      if (assets.length === 0) assets = [{ code: anchor.assetCode, enabled: false }];
+    }
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { event: 'probe.deposit.error', domain, error },
+      'deposit-availability probe caught an exception'
+    );
+  }
+
+  const end = now();
+  const base = { domain, latencyMs: Math.max(0, end - start), at: end };
+  const samples: ProbeSample[] =
+    assets === null
+      ? [
+          {
+            ...base,
+            reachable: false,
+            failureType: classifyFailure(error ?? ''),
+            error: error ?? 'deposit probe failed',
+            corridor: `deposit:${anchor.assetCode}`,
+          },
+        ]
+      : assets.map(({ code, enabled }) =>
+          enabled
+            ? { ...base, reachable: true, failureType: null, corridor: `deposit:${code}` }
+            : {
+                ...base,
+                reachable: false,
+                failureType: 'unknown',
+                error: `deposit disabled for ${code}`,
+                corridor: `deposit:${code}`,
+              }
+        );
+
+  for (const sample of samples) store.record(sample);
+  logger.info(
+    {
+      event: 'probe.deposit.sample',
+      domain,
+      assets: samples.length,
+      reachable: samples.filter((s) => s.reachable).length,
+    },
+    'deposit-availability samples recorded'
+  );
+  return samples;
+}
+
+/**
+ * Runs the deposit-availability probe for every registered anchor,
+ * concurrently. A failure in one anchor is logged and swallowed so it never
+ * aborts the fleet run. Defaults to the registered fleet in
+ * `constants/anchors.ts`; a different anchor list may be injected for tests.
+ */
+export async function probeAllAnchorDeposits(
+  store: ProbeSampleStore,
+  deps?: DepositProbeDeps,
+  anchors: readonly Anchor[] = ANCHORS
+): Promise<ProbeSample[]> {
+  logger.info(
+    { event: 'probe.deposit.all.start', anchorCount: anchors.length },
+    'starting deposit-availability probe run'
+  );
+  const perAnchor = await Promise.all(
+    anchors.map((anchor) =>
+      probeDepositAvailability(anchor, store, deps).catch((err: unknown) => {
+        logger.warn(
+          {
+            event: 'probe.deposit.anchor.error',
+            anchorId: anchor.id,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          'deposit-availability probe failed for one anchor'
+        );
+        return [] as ProbeSample[];
+      })
+    )
+  );
+  const samples = perAnchor.flat();
+  logger.info(
+    {
+      event: 'probe.deposit.all.complete',
+      total: samples.length,
+      reachable: samples.filter((s) => s.reachable).length,
+    },
+    'deposit-availability probe run complete'
+  );
+  return samples;
+}
+
 // ─── Durable persistence adapter (Issue #D007) ─────────────────────────────────
 //
 // `ProbeSampleStore` (used by every probe function above) is the in-memory
@@ -1372,14 +1534,11 @@ export class AnchorHealthTracker {
 //
 // Where an anchor runs a SEP-38 quote server, record its indicative /prices
 // for the reference amount on every refresh cycle, so a price history exists
-// even when no user transacts. Rows go through the narrow sink below; the
-// durable `quote_history` backend arrives with Q38012 (#1508) and satisfies
-// the sink directly.
+// even when no user transacts. Rows go through the narrow sink below, which
+// the durable `ReputationStore` (Q38012) satisfies directly.
 
-/** Where quote-history rows land. `ReputationStore` gains this with #1508. */
-export interface QuoteHistorySink {
-  recordQuote(row: QuoteHistoryRow): Promise<void>;
-}
+/** Where quote-history rows land. */
+export type QuoteHistorySink = Pick<ReputationStore, 'recordQuote'>;
 
 /** Injectable dependencies for the /prices probe. */
 export interface Sep38PricesProbeDeps {
@@ -1462,7 +1621,20 @@ export async function probeSep38Prices(
           source: 'sep38-prices',
           observedAt,
         };
-        await sink.recordQuote(row);
+        try {
+          await sink.recordQuote(row);
+        } catch (err) {
+          // A row the store rejects (or a write that fails) must not abort the sweep.
+          logger.warn(
+            {
+              event: 'probe.sep38prices.skip',
+              anchorId: anchor.id,
+              error: err instanceof Error ? err.message : String(err),
+            },
+            'sep38 prices probe skipped a row: quote_history write failed'
+          );
+          continue;
+        }
         rows.push(row);
       }
     }

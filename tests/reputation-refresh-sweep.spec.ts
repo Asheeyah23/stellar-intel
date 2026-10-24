@@ -118,15 +118,16 @@ describe('POST /api/reputation/refresh probe sweep', () => {
     });
   });
 
-  it('runs the SEP-38 prices probe over the anchor registry with a quote-history sink', async () => {
+  it('runs the SEP-38 prices probe over the anchor registry, writing to the store', async () => {
+    const store = { recordQuote: vi.fn().mockResolvedValue(undefined) };
+    mocks.getReputationStore.mockReturnValue(store);
+
     await POST(makeRequest());
 
     expect(mocks.probeSep38Prices).toHaveBeenCalledTimes(1);
     const [anchors, sink] = mocks.probeSep38Prices.mock.calls[0]!;
     expect(anchors).toBe(ANCHORS);
-    // The store mock has no `recordQuote` yet (#1508), so the route must hand
-    // the probe its explicit no-op fallback rather than the store itself.
-    expect(typeof (sink as { recordQuote: unknown }).recordQuote).toBe('function');
+    expect(sink).toBe(store);
   });
 
   it('counts samples the SEP-31 sink persists', async () => {

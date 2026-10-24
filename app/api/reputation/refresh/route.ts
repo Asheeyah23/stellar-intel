@@ -12,7 +12,6 @@ import {
   probeAllAnchorIntegrity,
   probeAllAnchorSep31,
   probeSep38Prices,
-  type QuoteHistorySink,
 } from '@/lib/reputation/probe';
 import { ANCHORS } from '@/constants/anchors';
 
@@ -47,14 +46,6 @@ async function runProbeSweep(): Promise<ProbeSweepCounts> {
   const integritySink = new DurableProbeStore(store, 'toml-integrity');
   const sep31Sink = new DurableProbeStore(store, 'sep31-info');
 
-  // The quote-history sink is the store itself once #1508 lands its
-  // `recordQuote`; until then the rows are probed and counted but have no
-  // durable home, which the fallback makes explicit instead of silent.
-  const quoteHistorySink: QuoteHistorySink =
-    'recordQuote' in store
-      ? (store as unknown as QuoteHistorySink)
-      : { recordQuote: async () => {} };
-
   const [
     uptimeSamples,
     quoteSamples,
@@ -68,7 +59,7 @@ async function runProbeSweep(): Promise<ProbeSweepCounts> {
     probeAllAnchorIssuers(issuerSink),
     probeAllAnchorIntegrity(integritySink),
     probeAllAnchorSep31(sep31Sink),
-    probeSep38Prices(ANCHORS, quoteHistorySink),
+    probeSep38Prices(ANCHORS, store),
   ]);
 
   const sinks = [uptimeSink, quoteSink, issuerSink, integritySink, sep31Sink];

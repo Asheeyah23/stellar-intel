@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { postSep38Quote, Sep38ParseError, _clearSep38Cache } from '@/lib/stellar/sep38';
 import type { Sep38QuoteParams } from '@/types';
 
@@ -53,6 +53,10 @@ beforeEach(() => {
   lastInit = undefined;
   _clearSep38Cache();
   vi.restoreAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('postSep38Quote', () => {
@@ -159,6 +163,12 @@ describe('postSep38Quote', () => {
 
     expect(quote.context).toBe('sep6');
     expect(quote.fee).toEqual({ total: '1.25', percent: '0.5' });
+  });
+
+  it('throws Sep38ParseError when expires_at is missing', async () => {
+    mockFetch(quoteResponse({ expires_at: undefined }));
+
+    await expect(postSep38Quote(QUOTE_SERVER, JWT, PARAMS)).rejects.toBeInstanceOf(Sep38ParseError);
   });
 
   it('throws Sep38ParseError when expires_at is not a valid timestamp', async () => {

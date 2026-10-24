@@ -1,0 +1,8 @@
+# Source: https://bitbondsto.com/.well-known/stellar.toml (fetched 2026-10-18)
+[DOCUMENTATION]
+ORG_NAME = "Bitbond Finance GmbH"
+ORG_URL = "https://www.bitbondsto.com"
+
+[[CURRENCIES]]
+code = "BB1"
+issuer = "GD5J6HLF5666X4AZLTFTXLY46J5SW7EXRKBLEYPJP33S33MXZGV6CWFN"

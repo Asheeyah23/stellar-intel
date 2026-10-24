@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { probeSep38Prices, type QuoteHistorySink } from '@/lib/reputation/probe';
+import { createReputationStore } from '@/lib/reputation/store';
 import type { Anchor, Sep1TomlData, Sep38IndicativePrice } from '@/types';
 import type { QuoteHistoryRow } from '@/types/reputation';
 
@@ -152,5 +153,35 @@ describe('probeSep38Prices (Q38013 / #1509)', () => {
     });
     expect(returned).toHaveLength(2);
     expect(rows).toHaveLength(2);
+  });
+  it('writes durable rows into the real store', async () => {
+    const store = createReputationStore({ backend: 'memory' });
+    await probeSep38Prices([anchor()], store, {
+      resolveToml: vi.fn().mockResolvedValue({
+        ok: true,
+        data: tomlWithQuoteServer('zeam.example', 'https://quotes.zeam.example'),
+      }),
+      getPrices: vi.fn().mockResolvedValue([price('iso4217:NGN', '1600', '160000')]),
+      now: () => NOW,
+    });
+
+    expect(await store.queryQuotes({ anchorId: 'zeam', corridor: 'usdc-ngn' })).toHaveLength(1);
+    await store.close();
+  });
+
+  it('a rejected write is skipped, not thrown, and is not counted', async () => {
+    const sink: QuoteHistorySink = {
+      recordQuote: vi.fn().mockRejectedValue(new Error('store down')),
+    };
+    const returned = await probeSep38Prices([anchor()], sink, {
+      resolveToml: vi.fn().mockResolvedValue({
+        ok: true,
+        data: tomlWithQuoteServer('zeam.example', 'https://quotes.zeam.example'),
+      }),
+      getPrices: vi.fn().mockResolvedValue([price('iso4217:NGN', '1600', '160000')]),
+      now: () => NOW,
+    });
+
+    expect(returned).toEqual([]);
   });
 });
