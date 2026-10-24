@@ -795,6 +795,18 @@ export function openWithdrawPopup(url: string): Promise<string> {
   });
 }
 
+/** The fields of a SEP-24 `/transaction` record the withdraw flow reads. */
+export interface WithdrawTransactionRecord {
+  withdrawAnchorAccount: string;
+  memo: string;
+  memoType: string;
+  /** The anchor's own `amount_in`, `amount_out`, `amount_out_asset` and fee, when it reports them. */
+  amountIn?: string;
+  amountOut?: string;
+  amountOutAsset?: string;
+  amountFee?: string;
+}
+
 /**
  * Fetches the anchor's transaction record after the popup completes.
  * Returns the anchor account, memo, and memo type needed to build the Stellar payment.
@@ -804,7 +816,7 @@ export async function getWithdrawTransactionRecord(
   transactionId: string,
   jwt: string,
   signal?: AbortSignal
-): Promise<{ withdrawAnchorAccount: string; memo: string; memoType: string }> {
+): Promise<WithdrawTransactionRecord> {
   const res = await fetch(`${transferServer}/transaction?id=${transactionId}`, {
     headers: { Authorization: `Bearer ${jwt}` },
     ...(signal ? { signal } : {}),
@@ -830,9 +842,18 @@ export async function getWithdrawTransactionRecord(
     );
   }
 
+  const feeDetails = tx['fee_details'] as { total?: string } | undefined;
+  const amountFee = tx['amount_fee'] ?? feeDetails?.total;
+
   return {
     withdrawAnchorAccount: tx['withdraw_anchor_account'] as string,
     memo: (tx['memo'] as string) ?? '',
     memoType: (tx['memo_type'] as string) ?? 'text',
+    ...(tx['amount_in'] !== undefined && { amountIn: tx['amount_in'] as string }),
+    ...(tx['amount_out'] !== undefined && { amountOut: tx['amount_out'] as string }),
+    ...(tx['amount_out_asset'] !== undefined && {
+      amountOutAsset: tx['amount_out_asset'] as string,
+    }),
+    ...(amountFee !== undefined && { amountFee: amountFee as string }),
   };
 }
