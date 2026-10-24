@@ -207,6 +207,38 @@ describe('createOnRampHop', () => {
     );
   });
 
+  it('agrees with fetchDepositRates when the anchor keys /info by bare asset code', async () => {
+    mockGetSep24Info.mockResolvedValue({
+      deposit: { USDC: { enabled: true, fee_fixed: 0.5 } },
+      withdraw: {},
+      fee: { enabled: true },
+      transaction: { enabled: true },
+      transactions: { enabled: true },
+    });
+
+    const hopResult = await makeHop().plan(NGN_INPUT, {});
+    const comparison = await fetchDepositRates('usdc-ngn', '150000');
+
+    expect(hopResult.ok).toBe(true);
+    if (!hopResult.ok) return;
+    expect(comparison.errors).toEqual([]);
+    expect(comparison.rates).toHaveLength(1);
+    expect(comparison.rates[0]!.asset).toBe(USDC_ID);
+    expect(hopResult.step.output.asset).toBe(USDC_ID);
+    expect(Number(hopResult.step.output.amount)).toBeCloseTo(
+      comparison.rates[0]!.totalReceived ?? NaN,
+      6
+    );
+  });
+
+  it('fails planning with amount_too_small for an amount that is not a positive number', async () => {
+    const result = await makeHop().plan({ asset: 'iso4217:NGN', amount: '0' }, {});
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('amount_too_small');
+  });
+
   it('fails planning with no_exchange_rate when no reference price exists', async () => {
     mockReferenceMidPrice.mockRejectedValue(
       new Error(
