@@ -266,7 +266,7 @@ describe('fetchDepositRates', () => {
         { USDC: 1500 }
       );
       deps.getSep24Info = vi.fn(async (transferServer: string) => {
-        if (transferServer.includes('a.example.com')) return new Promise<never>(() => {});
+        if (transferServer === 'https://a.example.com/sep24') return new Promise<never>(() => {});
         return infoWith({ [USDC_ID]: { enabled: true } });
       });
 
